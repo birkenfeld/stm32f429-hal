@@ -3,7 +3,7 @@
 use core::cmp;
 
 use cast::u32;
-use stm32f30x::{rcc, RCC};
+use stm32f429::{rcc, RCC};
 
 use flash::ACR;
 use time::Hertz;
@@ -17,7 +17,9 @@ pub trait RccExt {
 impl RccExt for RCC {
     fn constrain(self) -> Rcc {
         Rcc {
-            ahb: AHB { _0: () },
+            ahb1: AHB1 { _0: () },
+            ahb2: AHB2 { _0: () },
+            ahb3: AHB3 { _0: () },
             apb1: APB1 { _0: () },
             apb2: APB2 { _0: () },
             cfgr: CFGR {
@@ -32,8 +34,12 @@ impl RccExt for RCC {
 
 /// Constrained RCC peripheral
 pub struct Rcc {
-    /// AMBA High-performance Bus (AHB) registers
-    pub ahb: AHB,
+    /// AMBA High-performance Bus 1 (AHB1) registers
+    pub ahb1: AHB1,
+    /// AMBA High-performance Bus 2 (AHB2) registers
+    pub ahb2: AHB2,
+    /// AMBA High-performance Bus 3 (AHB3) registers
+    pub ahb3: AHB3,
     /// Advanced Peripheral Bus 1 (APB1) registers
     pub apb1: APB1,
     /// Advanced Peripheral Bus 2 (APB2) registers
@@ -42,20 +48,54 @@ pub struct Rcc {
     pub cfgr: CFGR,
 }
 
-/// AMBA High-performance Bus (AHB) registers
-pub struct AHB {
+/// AMBA High-performance Bus 1 (AHB1) registers
+pub struct AHB1 {
     _0: (),
 }
 
-impl AHB {
-    pub(crate) fn enr(&mut self) -> &rcc::AHBENR {
+impl AHB1 {
+    pub(crate) fn enr(&mut self) -> &rcc::AHB1ENR {
         // NOTE(unsafe) this proxy grants exclusive access to this register
-        unsafe { &(*RCC::ptr()).ahbenr }
+        unsafe { &(*RCC::ptr()).ahb1enr }
     }
 
-    pub(crate) fn rstr(&mut self) -> &rcc::AHBRSTR {
+    pub(crate) fn rstr(&mut self) -> &rcc::AHB1RSTR {
         // NOTE(unsafe) this proxy grants exclusive access to this register
-        unsafe { &(*RCC::ptr()).ahbrstr }
+        unsafe { &(*RCC::ptr()).ahb1rstr }
+    }
+}
+
+/// AMBA High-performance Bus 2 (AHB2) registers
+pub struct AHB2 {
+    _0: (),
+}
+
+impl AHB2 {
+    pub(crate) fn enr(&mut self) -> &rcc::AHB2ENR {
+        // NOTE(unsafe) this proxy grants exclusive access to this register
+        unsafe { &(*RCC::ptr()).ahb2enr }
+    }
+
+    pub(crate) fn rstr(&mut self) -> &rcc::AHB2RSTR {
+        // NOTE(unsafe) this proxy grants exclusive access to this register
+        unsafe { &(*RCC::ptr()).ahb2rstr }
+    }
+}
+
+/// AMBA High-performance Bus 3 (AHB3) registers
+pub struct AHB3 {
+    _0: (),
+}
+
+impl AHB3 {
+    pub(crate) fn enr(&mut self) -> &rcc::AHB3ENR {
+        // NOTE(unsafe) this proxy grants exclusive access to this register
+        unsafe { &(*RCC::ptr()).ahb3enr }
+    }
+
+    pub(crate) fn rstr(&mut self) -> &rcc::AHB3RSTR {
+        // NOTE(unsafe) this proxy grants exclusive access to this register
+        unsafe { &(*RCC::ptr()).ahb3rstr }
     }
 }
 
@@ -206,23 +246,21 @@ impl CFGR {
         assert!(pclk2 <= 72_000_000);
 
         // adjust flash wait states
-        unsafe {
-            acr.acr().write(|w| {
-                w.latency().bits(if sysclk <= 24_000_000 {
-                    0b000
-                } else if sysclk <= 48_000_000 {
-                    0b001
-                } else {
-                    0b010
-                })
+        acr.acr().write(|w| {
+            w.latency().bits(if sysclk <= 24_000_000 {
+                0b000
+            } else if sysclk <= 48_000_000 {
+                0b001
+            } else {
+                0b010
             })
-        }
+        });
 
         let rcc = unsafe { &*RCC::ptr() };
         if let Some(pllmul_bits) = pllmul_bits {
             // use PLL as source
 
-            rcc.cfgr.write(|w| unsafe { w.pllmul().bits(pllmul_bits) });
+            rcc.cfgr.modify(|_, w| w.hpre().bits(pllmul_bits));
 
             rcc.cr.write(|w| w.pllon().set_bit());
 

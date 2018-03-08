@@ -5,7 +5,7 @@ use core::marker::PhantomData;
 
 use hal::serial;
 use nb;
-use stm32f30x::{USART1, USART2, USART3};
+use stm32f429::{USART1, USART2, USART3};
 
 use gpio::gpioa::{PA10, PA2, PA3, PA9};
 use gpio::gpiob::{PB10, PB11, PB6, PB7};

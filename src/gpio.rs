@@ -5,7 +5,7 @@
 
 use core::marker::PhantomData;
 
-use rcc::AHB;
+use rcc::AHB1;
 
 /// Extension trait to split a GPIO peripheral in independent pins and registers
 pub trait GpioExt {
@@ -13,7 +13,7 @@ pub trait GpioExt {
     type Parts;
 
     /// Splits the GPIO block into independent pins and registers
-    fn split(self, ahb: &mut AHB) -> Self::Parts;
+    fn split(self, ahb: &mut AHB1) -> Self::Parts;
 }
 
 /// Input mode (type state)
@@ -95,9 +95,9 @@ macro_rules! gpio {
             use core::marker::PhantomData;
 
             use hal::digital::OutputPin;
-            use stm32f30x::{$gpioy, $GPIOX};
+            use stm32f429::{$gpioy, $GPIOX};
 
-            use rcc::AHB;
+            use rcc::AHB1;
             use super::{
                 AF4, AF5, AF6, AF7, Floating, GpioExt, Input, OpenDrain, Output,
                 PullDown, PullUp, PushPull,
@@ -124,8 +124,8 @@ macro_rules! gpio {
             impl GpioExt for $GPIOX {
                 type Parts = Parts;
 
-                fn split(self, ahb: &mut AHB) -> Parts {
-                    ahb.enr().modify(|_, w| w.$iopxenr().enabled());
+                fn split(self, ahb: &mut AHB1) -> Parts {
+                    ahb.enr().modify(|_, w| w.$iopxenr().set_bit());
                     ahb.rstr().modify(|_, w| w.$iopxrst().set_bit());
                     ahb.rstr().modify(|_, w| w.$iopxrst().clear_bit());
 
@@ -487,7 +487,7 @@ macro_rules! gpio {
     }
 }
 
-gpio!(GPIOA, gpioa, gpioa, iopaen, ioparst, PAx, [
+gpio!(GPIOA, gpioa, gpioa, gpioaen, gpioarst, PAx, [
     PA0: (pa0, 0, Input<Floating>, AFRL),
     PA1: (pa1, 1, Input<Floating>, AFRL),
     PA2: (pa2, 2, Input<Floating>, AFRL),
@@ -507,7 +507,7 @@ gpio!(GPIOA, gpioa, gpioa, iopaen, ioparst, PAx, [
     // PA15: (15, Input<Floating>),
 ]);
 
-gpio!(GPIOB, gpiob, gpiob, iopben, iopbrst, PBx, [
+gpio!(GPIOB, gpiob, gpiob, gpioben, gpiobrst, PBx, [
     PB0: (pb0, 0, Input<Floating>, AFRL),
     PB1: (pb1, 1, Input<Floating>, AFRL),
     PB2: (pb2, 2, Input<Floating>, AFRL),
@@ -527,7 +527,7 @@ gpio!(GPIOB, gpiob, gpiob, iopben, iopbrst, PBx, [
     PB15: (pb15, 15, Input<Floating>, AFRH),
 ]);
 
-gpio!(GPIOC, gpioc, gpioc, iopcen, iopcrst, PCx, [
+gpio!(GPIOC, gpioc, gpiok, gpiocen, gpiocrst, PCx, [
     PC0: (pc0, 0, Input<Floating>, AFRL),
     PC1: (pc1, 1, Input<Floating>, AFRL),
     PC2: (pc2, 2, Input<Floating>, AFRL),
@@ -546,7 +546,7 @@ gpio!(GPIOC, gpioc, gpioc, iopcen, iopcrst, PCx, [
     PC15: (pc15, 15, Input<Floating>, AFRH),
 ]);
 
-gpio!(GPIOD, gpiod, gpioc, iopden, iopdrst, PDx, [
+gpio!(GPIOD, gpiod, gpiok, gpioden, gpiodrst, PDx, [
     PD0: (pd0, 0, Input<Floating>, AFRL),
     PD1: (pd1, 1, Input<Floating>, AFRL),
     PD2: (pd2, 2, Input<Floating>, AFRL),
@@ -565,7 +565,7 @@ gpio!(GPIOD, gpiod, gpioc, iopden, iopdrst, PDx, [
     PD15: (pd15, 15, Input<Floating>, AFRH),
 ]);
 
-gpio!(GPIOE, gpioe, gpioc, iopeen, ioperst, PEx, [
+gpio!(GPIOE, gpioe, gpiok, gpioeen, gpioerst, PEx, [
     PE0: (pe0, 0, Input<Floating>, AFRL),
     PE1: (pe1, 1, Input<Floating>, AFRL),
     PE2: (pe2, 2, Input<Floating>, AFRL),
@@ -584,7 +584,7 @@ gpio!(GPIOE, gpioe, gpioc, iopeen, ioperst, PEx, [
     PE15: (pe15, 15, Input<Floating>, AFRH),
 ]);
 
-gpio!(GPIOF, gpiof, gpioc, iopfen, iopfrst, PFx, [
+gpio!(GPIOF, gpiof, gpiok, gpiofen, gpiofrst, PFx, [
     PF0: (pf0, 0, Input<Floating>, AFRL),
     PF1: (pf1, 1, Input<Floating>, AFRL),
     PF2: (pf2, 2, Input<Floating>, AFRL),
