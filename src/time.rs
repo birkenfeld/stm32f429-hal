@@ -5,19 +5,19 @@ use cortex_m::peripheral::DWT;
 use rcc::Clocks;
 
 /// Bits per second
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct Bps(pub u32);
 
 /// Hertz
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct Hertz(pub u32);
 
 /// KiloHertz
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct KiloHertz(pub u32);
 
 /// MegaHertz
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct MegaHertz(pub u32);
 
 /// Extension trait that adds convenience methods to the `u32` type
@@ -68,6 +68,24 @@ impl Into<Hertz> for MegaHertz {
 impl Into<KiloHertz> for MegaHertz {
     fn into(self) -> KiloHertz {
         KiloHertz(self.0 * 1_000)
+    }
+}
+
+impl Into<KiloHertz> for Hertz {
+    fn into(self) -> KiloHertz {
+        KiloHertz(self.0 / 1_000)
+    }
+}
+
+impl Into<MegaHertz> for Hertz {
+    fn into(self) -> MegaHertz {
+        MegaHertz(self.0 / 1_000_000)
+    }
+}
+
+impl Into<MegaHertz> for KiloHertz {
+    fn into(self) -> MegaHertz {
+        MegaHertz(self.0 / 1_000)
     }
 }
 

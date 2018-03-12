@@ -53,6 +53,7 @@ pub struct AHB1 {
     _0: (),
 }
 
+#[allow(unused)]
 impl AHB1 {
     pub(crate) fn enr(&mut self) -> &rcc::AHB1ENR {
         // NOTE(unsafe) this proxy grants exclusive access to this register
@@ -70,6 +71,7 @@ pub struct AHB2 {
     _0: (),
 }
 
+#[allow(unused)]
 impl AHB2 {
     pub(crate) fn enr(&mut self) -> &rcc::AHB2ENR {
         // NOTE(unsafe) this proxy grants exclusive access to this register
@@ -87,6 +89,7 @@ pub struct AHB3 {
     _0: (),
 }
 
+#[allow(unused)]
 impl AHB3 {
     pub(crate) fn enr(&mut self) -> &rcc::AHB3ENR {
         // NOTE(unsafe) this proxy grants exclusive access to this register
@@ -121,6 +124,7 @@ pub struct APB2 {
     _0: (),
 }
 
+#[allow(unused)]
 impl APB2 {
     pub(crate) fn enr(&mut self) -> &rcc::APB2ENR {
         // NOTE(unsafe) this proxy grants exclusive access to this register
@@ -133,9 +137,10 @@ impl APB2 {
     }
 }
 
-const HSI: u32 = 8_000_000; // Hz
+const HSI: u32 = 16_000_000; // 16 MHz
 
 /// Clock configuration
+#[derive(Debug)]
 pub struct CFGR {
     hclk: Option<u32>,
     pclk1: Option<u32>,
@@ -194,10 +199,11 @@ impl CFGR {
 
         assert!(sysclk <= 72_000_000);
 
+        // Prescaler factor
         let hpre_bits = self.hclk
             .map(|hclk| match sysclk / hclk {
                 0 => unreachable!(),
-                1 => 0b0111,
+                1 => 0b0111,  // sysclk not divided
                 2 => 0b1000,
                 3...5 => 0b1001,
                 6...11 => 0b1010,
@@ -207,7 +213,7 @@ impl CFGR {
                 192...383 => 0b1110,
                 _ => 0b1111,
             })
-            .unwrap_or(0b0111);
+            .unwrap_or(0b0111);  // sysclk not divided
 
         let hclk = sysclk / (1 << (hpre_bits - 0b0111));
 
@@ -227,7 +233,8 @@ impl CFGR {
         let ppre1 = 1 << (ppre1_bits - 0b011);
         let pclk1 = hclk / u32(ppre1);
 
-        assert!(pclk1 <= 36_000_000);
+        // Must not exceed 45 MHz!
+        assert!(pclk1 <= 45_000_000);
 
         let ppre2_bits = self.pclk2
             .map(|pclk2| match hclk / pclk2 {
@@ -243,7 +250,8 @@ impl CFGR {
         let ppre2 = 1 << (ppre2_bits - 0b011);
         let pclk2 = hclk / u32(ppre2);
 
-        assert!(pclk2 <= 72_000_000);
+        // Must not exceed 90 MHz!
+        assert!(pclk2 <= 90_000_000);
 
         // adjust flash wait states
         acr.acr().write(|w| {
@@ -259,22 +267,28 @@ impl CFGR {
         let rcc = unsafe { &*RCC::ptr() };
         if let Some(pllmul_bits) = pllmul_bits {
             // use PLL as source
-
             rcc.cfgr.modify(|_, w| w.hpre().bits(pllmul_bits));
 
+            // Enable PLL
             rcc.cr.write(|w| w.pllon().set_bit());
-
+            // Wait for PLL ready
             while rcc.cr.read().pllrdy().bit_is_clear() {}
 
             // SW: PLL selected as system clock
             rcc.cfgr.modify(|_, w| unsafe {
-                w.ppre2()
+                w
+                    // APB high-speed prescaler (APB2)
+                    .ppre2()
                     .bits(ppre2_bits)
+                    // APB Low speed prescaler (APB1)
                     .ppre1()
                     .bits(ppre1_bits)
+                    // AHB prescaler
                     .hpre()
                     .bits(hpre_bits)
+                    // System clock switch
                     .sw()
+                    // PLL selected as system clock
                     .bits(0b10)
             });
         } else {
@@ -307,7 +321,7 @@ impl CFGR {
 /// Frozen clock frequencies
 ///
 /// The existence of this value indicates that the clock configuration can no longer be changed
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct Clocks {
     hclk: Hertz,
     pclk1: Hertz,
