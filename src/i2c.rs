@@ -62,6 +62,7 @@ unsafe impl SdaPin<I2C3> for PC9<AF4> {}
 unsafe impl SdaPin<I2C3> for PH8<AF4> {}
 
 /// I2C peripheral operating in master mode
+#[allow(unused)]
 pub struct I2c<I2C, SCL, SDA> {
     i2c: I2C,
     scl: SCL,
@@ -140,15 +141,6 @@ macro_rules! hal {
                     i2c.cr1.write(|w| w.pe().set_bit());
 
                     I2c { i2c, scl, sda }
-                }
-
-                /// Releases the I2C peripheral and associated pins
-                pub fn free(self) -> ($I2CX, SCL, SDA) {
-                    (self.i2c, self.scl, self.sda)
-                }
-
-                fn wait_busy(&self) {
-                    while self.i2c.sr2.read().busy().bit() {}
                 }
             }
 
@@ -240,7 +232,7 @@ macro_rules! hal {
                             .ack().clear_bit()
                     });
 
-                    self.wait_busy();
+                    while self.i2c.sr2.read().busy().bit() {}
                     Ok(())
                 }
             }
