@@ -3,9 +3,11 @@
 use cast::{u16, u32};
 use hal::timer::{CountDown, Periodic};
 use nb;
-use stm32f429::{TIM2, TIM3, TIM4, TIM6, TIM7};
+use stm32f429::{TIM2, TIM3, TIM4, TIM5,
+                TIM6, TIM7, TIM9, TIM10,
+                TIM11, TIM12, TIM13, TIM14};
 
-use rcc::{APB1, Clocks};
+use rcc::{APB1, APB2, Clocks};
 use time::Hertz;
 
 /// Hardware timers
@@ -22,7 +24,7 @@ pub enum Event {
 }
 
 macro_rules! hal {
-    ($($TIM:ident: ($tim:ident, $timXen:ident, $timXrst:ident),)+) => {
+    ($($TIM:ident: ($tim:ident, $APB:ident, $timXen:ident, $timXrst:ident),)+) => {
         $(
             impl Periodic for Timer<$TIM> {}
 
@@ -72,14 +74,14 @@ macro_rules! hal {
                 // even if the `$TIM` are non overlapping (compare to the `free` function below
                 // which just works)
                 /// Configures a TIM peripheral as a periodic count down timer
-                pub fn $tim<T>(tim: $TIM, timeout: T, clocks: Clocks, apb1: &mut APB1) -> Self
+                pub fn $tim<T>(tim: $TIM, timeout: T, clocks: Clocks, apb: &mut $APB) -> Self
                 where
                     T: Into<Hertz>,
                 {
                     // enable and reset peripheral to a clean slate state
-                    apb1.enr().modify(|_, w| w.$timXen().set_bit());
-                    apb1.rstr().modify(|_, w| w.$timXrst().set_bit());
-                    apb1.rstr().modify(|_, w| w.$timXrst().clear_bit());
+                    apb.enr().modify(|_, w| w.$timXen().set_bit());
+                    apb.rstr().modify(|_, w| w.$timXrst().set_bit());
+                    apb.rstr().modify(|_, w| w.$timXrst().clear_bit());
 
                     let mut timer = Timer {
                         clocks,
@@ -123,9 +125,16 @@ macro_rules! hal {
 }
 
 hal! {
-    TIM2: (tim2, tim2en, tim2rst),
-    TIM3: (tim3, tim3en, tim3rst),
-    TIM4: (tim4, tim4en, tim4rst),
-    TIM6: (tim6, tim6en, tim6rst),
-    TIM7: (tim7, tim7en, tim7rst),
+    TIM2: (tim2, APB1, tim2en, tim2rst),
+    TIM3: (tim3, APB1, tim3en, tim3rst),
+    TIM4: (tim4, APB1, tim4en, tim4rst),
+    TIM5: (tim5, APB1, tim5en, tim5rst),
+    TIM6: (tim6, APB1, tim6en, tim6rst),
+    TIM7: (tim7, APB1, tim7en, tim7rst),
+    TIM9: (tim9, APB2, tim9en, tim9rst),
+    TIM10: (tim10, APB2, tim10en, tim10rst),
+    TIM11: (tim11, APB2, tim11en, tim11rst),
+    TIM12: (tim12, APB1, tim12en, tim12rst),
+    TIM13: (tim13, APB1, tim13en, tim13rst),
+    TIM14: (tim14, APB1, tim14en, tim14rst),
 }
