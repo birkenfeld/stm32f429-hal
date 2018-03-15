@@ -41,3 +41,4 @@ pub mod rcc;
 pub mod time;
 pub mod timer;
 pub mod i2s;
+pub mod dma;

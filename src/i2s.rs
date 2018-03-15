@@ -9,6 +9,7 @@ use gpio::gpioc::{PC2, PC3, PC6, PC7};
 use gpio::{AF5, AF6};
 use rcc::{APB1, APB2, Clocks};
 // use time::{KiloHertz, MegaHertz};
+use dma::*;
 
 /// SD: Serial Data (mapped on the MOSI pin) to transmit or receive
 /// the two time- multiplexed data channels (in half-duplex mode
@@ -56,6 +57,25 @@ pub unsafe trait MckPin<I2S> {}
 unsafe impl MckPin<SPI2> for PC6<AF5> {}
 unsafe impl MckPin<SPI3> for PC7<AF6> {}
 // TODO: continue after PC7
+
+/// Rx direction
+pub struct DmaRx;
+/// Tx direction
+pub struct DmaTx;
+
+/// Possible DMA configuration for an SPI device
+pub unsafe trait I2sDmaStream<STREAM, CHANNEL, DIRECTION> {}
+// DMA: there are only impls for SPI1..3, not 4..6 yet
+unsafe impl I2sDmaStream<SPI3, C0, DmaRx> for dma1::S0 {}
+unsafe impl I2sDmaStream<SPI3, C0, DmaRx> for dma1::S2 {}
+unsafe impl I2sDmaStream<SPI2, C0, DmaRx> for dma1::S3 {}
+unsafe impl I2sDmaStream<SPI2, C0, DmaTx> for dma1::S4 {}
+unsafe impl I2sDmaStream<SPI3, C0, DmaTx> for dma1::S5 {}
+unsafe impl I2sDmaStream<SPI3, C0, DmaTx> for dma1::S7 {}
+unsafe impl I2sDmaStream<SPI1, C3, DmaRx> for dma2::S0 {}
+unsafe impl I2sDmaStream<SPI1, C3, DmaRx> for dma2::S2 {}
+unsafe impl I2sDmaStream<SPI1, C3, DmaTx> for dma2::S3 {}
+unsafe impl I2sDmaStream<SPI1, C3, DmaTx> for dma2::S5 {}
 
 
 /// Slave role (doesn't provide clock)
@@ -175,6 +195,17 @@ macro_rules! hal {
                 pub fn write(&mut self, data: u16) {
                     while ! self.spi.sr.read().txe().bit() {}
                     self.spi.dr.write(|w| unsafe { w.dr().bits(data) });
+                }
+
+                pub fn dma_write<'a, S, C>(&mut self, data: &'a [u16], stream: S) -> Result<S, S>
+                where S: DmaStream + I2sDmaStream<$SPIX, C, DmaTx>,
+                      C: DmaChannel,
+                {
+                    // Let SPI/I2S make a DMA request whenever the TXE flag is set
+                    self.spi.cr2.modify(|_, w| w.txdmaen().set_bit());
+
+                    let transfer: Transfer<'a, S, C> = stream.memory_to_peripheral(data, &self.spi.dr);
+                    transfer.wait()
                 }
             }
         )+
