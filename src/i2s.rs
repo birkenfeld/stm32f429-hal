@@ -106,12 +106,37 @@ pub struct I2s<SPI, SD, CK, WS> {
 
 /// I2S peripheral
 #[allow(unused)]
-pub struct I2sOutput<Role, SPI, SD, CK, WS> {
+pub struct I2sOutput<Role, Data, SPI, SD, CK, WS> {
     role: PhantomData<Role>,
+    data: PhantomData<Data>,
     spi: SPI,
     sd: SD,
     ck: CK,
     ws: WS,
+}
+
+pub trait I2sData {
+    fn datlen() -> u8;
+    fn for_u16<F: Fn(u16)>(&self, f: F);
+}
+
+impl I2sData for u16 {
+    fn datlen() -> u8 {
+        0b00
+    }
+    fn for_u16<F: Fn(u16)>(&self, f: F) {
+        f(*self);
+    }
+}
+
+impl I2sData for u32 {
+    fn datlen() -> u8 {
+        0b10
+    }
+    fn for_u16<F: Fn(u16)>(&self, f: F) {
+        f((*self >> 16) as u16);
+        f(*self as u16);
+    }
 }
 
 macro_rules! hal {
@@ -142,7 +167,7 @@ macro_rules! hal {
                 }
 
                 /// Configure in slave mode as output
-                pub fn into_slave_output(self, standard: I2sStandard) -> I2sOutput<SlaveRole, $SPIX, SD, CK, WS> {
+                pub fn into_slave_output<Data: I2sData>(self, standard: I2sStandard) -> I2sOutput<SlaveRole, Data, $SPIX, SD, CK, WS> {
                     self.spi.i2scfgr.modify(|_, w| {
                         unsafe {
                             // Select I2S mode
@@ -150,22 +175,23 @@ macro_rules! hal {
                                 // Configuration (slave, output)
                                 .i2scfg().bits(0b00)
                                 .i2sstd().bits(standard as u8)
-                                // 16 bit
-                                .datlen().bits(0b00)
-                                // 16 bit
+                                // data length
+                                .datlen().bits(Data::datlen())
+                                // "auto"
                                 .chlen().clear_bit()
                         }
                     });
                     // If needed, select all the potential interrupt
                     // sources and the DMA capabilities by writing the
                     // SPI_CR2 register.
-                    
+
                     // The I2SE bit in SPI_I2SCFGR register must be
                     // set.
                     self.spi.i2scfgr.modify(|_, w| w.i2se().set_bit());
 
                     I2sOutput {
                         role: PhantomData,
+                        data: PhantomData,
                         spi: self.spi,
                         sd: self.sd,
                         ck: self.ck,
@@ -174,7 +200,7 @@ macro_rules! hal {
                 }
             }
 
-            impl<Role, SD, CK, WS> I2sOutput<Role, $SPIX, SD, CK, WS> {
+            impl<Role, Data: I2sData, SD, CK, WS> I2sOutput<Role, Data, $SPIX, SD, CK, WS> {
                 /// Disable and return `I2s`
                 pub fn into_i2s(self) -> I2s<$SPIX, SD, CK, WS> {
                     // Wait
@@ -192,12 +218,14 @@ macro_rules! hal {
                 }
 
                 /// Write data word
-                pub fn write(&mut self, data: u16) {
-                    while ! self.spi.sr.read().txe().bit() {}
-                    self.spi.dr.write(|w| unsafe { w.dr().bits(data) });
+                pub fn write(&mut self, data: Data) {
+                    data.for_u16(|word| {
+                        while ! self.spi.sr.read().txe().bit() {}
+                        self.spi.dr.write(|w| unsafe { w.dr().bits(word) });
+                    });
                 }
 
-                pub fn dma_write<'a, S, C>(&mut self, data: &'a [u16], stream: S) -> Result<S, S>
+                pub fn dma_write<'a, S, C>(&mut self, data: &'a [Data], stream: S) -> Result<S, S>
                 where S: DmaStream + I2sDmaStream<$SPIX, C, DmaTx>,
                       C: DmaChannel,
                 {
