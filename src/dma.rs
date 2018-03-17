@@ -117,7 +117,6 @@ macro_rules! dma {
         $(
             pub mod $dmaX {
                 use core::marker::PhantomData;
-                use core::mem::size_of;
                 use stm32f429::{$DMAX, dma2};
 
                 use rcc::AHB1;
@@ -199,7 +198,7 @@ macro_rules! dma {
                             });
                             let source_addr = &source.as_ref() as *const _ as u32;
                             self.m0ar().write(|w| unsafe { w.bits(source_addr) });
-                            let source_len = (source.as_ref().len() * size_of::<SE>()) as u32;
+                            let source_len = source.as_ref().len() as u32;
                             self.ndtr().write(|w| unsafe { w.bits(source_len) });
                             let target_addr = target as *const _ as u32;
                             self.par().write(|w| unsafe { w.bits(target_addr) });
