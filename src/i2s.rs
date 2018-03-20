@@ -124,6 +124,7 @@ impl I2sData for u16 {
     fn datlen() -> u8 {
         0b00
     }
+    #[inline]
     fn for_u16<F: Fn(u16)>(&self, f: F) {
         f(*self);
     }
@@ -133,6 +134,7 @@ impl I2sData for u32 {
     fn datlen() -> u8 {
         0b10
     }
+    #[inline]
     fn for_u16<F: Fn(u16)>(&self, f: F) {
         f((*self >> 16) as u16);
         f(*self as u16);
@@ -231,8 +233,14 @@ macro_rules! hal {
                 {
                     // Let SPI/I2S make a DMA request whenever the TXE flag is set
                     self.spi.cr2.modify(|_, w| w.txdmaen().set_bit());
+                    // Writing a 16-bit register here,
+                    // even if rust2svd-generated code
+                    // <T> accesses it as 32-bit aligned.
+                    let dr: &u16 = unsafe {
+                        &*(&self.spi.dr as *const _ as *const u16)
+                    };
 
-                    let transfer: Transfer<'a, S, C> = stream.memory_to_peripheral(data, &self.spi.dr);
+                    let transfer: Transfer<'a, S, C> = stream.memory_to_peripheral(data, dr);
                     transfer.wait()
                 }
             }
