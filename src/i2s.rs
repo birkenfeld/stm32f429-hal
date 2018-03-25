@@ -202,7 +202,7 @@ macro_rules! hal {
                 }
             }
 
-            impl<Role, Data: I2sData, SD, CK, WS> I2sOutput<Role, Data, $SPIX, SD, CK, WS> {
+            impl<Role, Data: I2sData + Sized, SD, CK, WS> I2sOutput<Role, Data, $SPIX, SD, CK, WS> {
                 /// Disable and return `I2s`
                 pub fn into_i2s(self) -> I2s<$SPIX, SD, CK, WS> {
                     // Wait
@@ -227,8 +227,8 @@ macro_rules! hal {
                     });
                 }
 
-                pub fn dma_write<'a, S, C>(&mut self, data: &'a [Data], stream: S) -> Result<S, S>
-                where S: DmaStream + I2sDmaStream<$SPIX, C, DmaTx>,
+                pub fn dma_transfer<'s, X: Transfer<STREAM, &'s S, u16>, S, STREAM, C>(&mut self, data: &'s S, stream: STREAM) -> Result<X, STREAM>
+                where STREAM: DmaStream + I2sDmaStream<$SPIX, C, DmaTx>,
                       C: DmaChannel,
                 {
                     // Let SPI/I2S make a DMA request whenever the TXE flag is set
@@ -236,12 +236,11 @@ macro_rules! hal {
                     // Writing a 16-bit register here,
                     // even if rust2svd-generated code
                     // <T> accesses it as 32-bit aligned.
-                    let dr: &u16 = unsafe {
-                        &*(&self.spi.dr as *const _ as *const u16)
+                    let dr: &mut u16 = unsafe {
+                        &mut *(&self.spi.dr as *const _ as *mut u16)
                     };
 
-                    let transfer: Transfer<'a, S, C> = stream.memory_to_peripheral(data, dr);
-                    transfer.wait()
+                    stream.transfer(data, dr)
                 }
             }
         )+

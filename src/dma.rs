@@ -1,6 +1,5 @@
 //! DMA abstractions
 
-use core::marker::PhantomData;
 use core::mem::size_of;
 use rcc::AHB1;
 
@@ -61,27 +60,14 @@ pub enum Event {
     TransferComplete,
 }
 
-pub struct Transfer<'src, STREAM, CHANNEL> {
-    source: PhantomData<&'src ()>,
-    stream: STREAM,
-    channel: PhantomData<CHANNEL>,
-}
+pub trait Transfer<STREAM, S, T>: Sized {
+    fn new(stream: STREAM, source: S, target: &mut T) -> Result<Self, STREAM>;
 
-impl<'src, CHANNEL, STREAM: DmaStream> Transfer<'src, STREAM, CHANNEL> {
-    pub fn is_complete(&self) -> bool {
-        self.stream.is_complete()
-    }
+    fn is_complete(&self) -> bool;
+    fn has_error(&self) -> bool;
+    fn reset(self) -> STREAM;
 
-    pub fn has_error(&self) -> bool {
-        self.stream.has_error()
-    }
-
-    pub fn reset(mut self) -> STREAM {
-        self.stream.reset();
-        self.stream
-    }
-
-    pub fn wait(self) -> Result<STREAM, STREAM> {
+    fn wait(self) -> Result<STREAM, STREAM> {
         while !self.is_complete() && !self.has_error() {}
         if self.is_complete() {
             Ok(self.reset())
@@ -91,10 +77,11 @@ impl<'src, CHANNEL, STREAM: DmaStream> Transfer<'src, STREAM, CHANNEL> {
     }
 }
 
+
 pub trait DmaStream: Sized {
     fn listen(&mut self, event: Event);
     fn unlisten(&mut self, event: Event);
-    fn memory_to_peripheral<'src, SE, T, C: DmaChannel>(self, source: &'src [SE], target: &T) -> Transfer<'src, Self, C>;
+    fn transfer<S, T, X: Transfer<Self, S, T>>(self, source: S, target: &mut T) -> Result<X, Self>;
     fn is_complete(&self) -> bool;
     fn has_error(&self) -> bool;
     fn reset(&mut self);
@@ -108,6 +95,7 @@ macro_rules! dma {
             $ndtrX:ident: $NDTRX:ident,
             $parX:ident: $PARX:ident,
             $m0arX:ident: $M0ARX:ident,
+            $m1arX:ident: $M1ARX:ident,
             $isr:ident: $ISR:ident,
             $ifcr:ident: $IFCR:ident,
             $tcif:ident, $teif:ident,
@@ -116,12 +104,11 @@ macro_rules! dma {
     }),)+) => {
         $(
             pub mod $dmaX {
-                use core::marker::PhantomData;
                 use stm32f429::{$DMAX, dma2};
 
                 use rcc::AHB1;
-                use dma::{DmaExt, DmaStream, DmaChannel,
-                          Event, Transfer, data_size};
+                use dma::{DmaExt, DmaStream,
+                          Transfer, Event};
 
                 pub struct Streams {
                     $(pub $sx: $SX),+
@@ -160,6 +147,10 @@ macro_rules! dma {
                         fn m0ar(&mut self) -> &dma2::$M0ARX {
                             unsafe { &(*$DMAX::ptr()).$m0arX }
                         }
+
+                        fn m1ar(&mut self) -> &dma2::$M1ARX {
+                            unsafe { &(*$DMAX::ptr()).$m1arX }
+                        }
                     }
 
                     impl DmaStream for $SX {
@@ -183,34 +174,8 @@ macro_rules! dma {
                             }
                         }
 
-                        fn memory_to_peripheral<'src, SE, T, C>(mut self, source: &'src [SE], target: &T) -> Transfer<'src, Self, C>
-                        where C: DmaChannel,
-                        {
-                            self.cr().modify(|_, w| unsafe {
-                                w.msize().bits(data_size::<SE>())
-                                    .minc().set_bit()
-                                    .psize().bits(data_size::<T>())
-                                    .pinc().clear_bit()
-                                    .circ().clear_bit()
-                                    // Memory to peripheral
-                                    .dir().bits(0b01)
-                                    .chsel().bits(C::channel())
-                            });
-                            let source_addr = &source.as_ref() as *const _ as u32;
-                            self.m0ar().write(|w| unsafe { w.bits(source_addr) });
-                            let source_len = source.as_ref().len() as u32;
-                            self.ndtr().write(|w| unsafe { w.bits(source_len) });
-                            let target_addr = target as *const _ as u32;
-                            self.par().write(|w| unsafe { w.bits(target_addr) });
-
-                            // Enable Stream
-                            self.cr().modify(|_, w| w.en().set_bit());
-
-                            Transfer {
-                                source: PhantomData,
-                                channel: PhantomData,
-                                stream: self
-                            }
+                        fn transfer<S, T, X: Transfer<Self, S, T>>(self, source: S, target: &mut T) -> Result<X, Self> {
+                            X::new(self, source, target)
                         }
 
                         fn is_complete(&self) -> bool {
@@ -230,6 +195,167 @@ macro_rules! dma {
                                 w.$ctcif().set_bit()
                                     .$cteif().set_bit()
                             });
+                        }
+                    }
+
+                    pub mod $sx {
+                        use core::marker::PhantomData;
+                        use dma::{DmaStream, DmaChannel,
+                                  Transfer, data_size};
+                        use super::$SX;
+
+                        pub struct MemoryToPeripheral<'s, S: 's + AsRef<[SE]>, SE, T, CHANNEL> {
+                            _source: PhantomData<&'s S>,
+                            _source_element: PhantomData<SE>,
+                            _target: PhantomData<T>,
+                            stream: $SX,
+                            _channel: PhantomData<CHANNEL>,
+                        }
+
+                        impl<'s, SE, S: 's + AsRef<[SE]>, T, CHANNEL: DmaChannel> Transfer<$SX, &'s S, T> for MemoryToPeripheral<'s, S, SE, T, CHANNEL> {
+                            fn new(mut stream: $SX, source: &'s S, target: &mut T) -> Result<Self, $SX> {
+                                stream.cr().modify(|_, w| unsafe {
+                                    w.msize().bits(data_size::<SE>())
+                                        .minc().set_bit()
+                                        .psize().bits(data_size::<T>())
+                                        .pinc().clear_bit()
+                                        .circ().clear_bit()
+                                        // Memory to peripheral
+                                        .dir().bits(0b01)
+                                        .chsel().bits(CHANNEL::channel())
+                                });
+
+                                let source_addr = &source.as_ref() as *const _ as u32;
+                                stream.m0ar().write(|w| unsafe { w.bits(source_addr) });
+                                let source_len = source.as_ref().len() as u32;
+                                stream.ndtr().write(|w| unsafe { w.bits(source_len) });
+                                let target_addr = target as *const _ as u32;
+                                stream.par().write(|w| unsafe { w.bits(target_addr) });
+
+                                // Enable Stream
+                                stream.cr().modify(|_, w| w.en().set_bit());
+
+                                Ok(Self {
+                                    _source: PhantomData,
+                                    _source_element: PhantomData,
+                                    _target: PhantomData,
+                                    stream,
+                                    _channel: PhantomData,
+                                })
+                            }
+
+                            fn is_complete(&self) -> bool {
+                                self.stream.is_complete()
+                            }
+
+                            fn has_error(&self) -> bool {
+                                self.stream.has_error()
+                            }
+
+                            fn reset(mut self) -> $SX {
+                                self.stream.reset();
+                                self.stream
+                            }
+                        }
+
+                        pub struct DoubleBufferedTransfer<'s, S: 's, SE, T, CHANNEL> {
+                            /// So that `poll()` can detect a buffer switch
+                            last_ct: usize,
+                            source0: &'s S,
+                            source1: &'s S,
+                            _source_element: PhantomData<SE>,
+                            _target: PhantomData<T>,
+                            stream: $SX,
+                            _channel: PhantomData<CHANNEL>,
+                        }
+
+                        impl<'s, SE, S: 's + AsRef<[SE]>, T, CHANNEL: DmaChannel> Transfer<$SX, (&'s S, &'s S), T> for DoubleBufferedTransfer<'s, S, SE, T, CHANNEL> {
+                            fn new(mut stream: $SX, source: (&'s S, &'s S), target: &mut T) -> Result<Self, $SX> {
+                                if source.0.as_ref().len() != source.1.as_ref().len() {
+                                    return Err(stream)
+                                }
+
+                                stream.cr().modify(|_, w| unsafe {
+                                    w.msize().bits(data_size::<SE>())
+                                        .minc().set_bit()
+                                        .psize().bits(data_size::<T>())
+                                        .pinc().clear_bit()
+                                        .dbm().set_bit()
+                                        .ct().clear_bit()
+                                        .circ().set_bit()
+                                        // Memory to peripheral
+                                        .dir().bits(0b01)
+                                        .chsel().bits(CHANNEL::channel())
+                                });
+
+                                let source0_addr = source.0 as *const _ as u32;
+                                stream.m0ar().write(|w| unsafe { w.bits(source0_addr) });
+                                let source1_addr = source.1 as *const _ as u32;
+                                stream.m1ar().write(|w| unsafe { w.bits(source1_addr) });
+                                let source_len = source.0.as_ref().len() as u32;
+                                stream.ndtr().write(|w| unsafe { w.bits(source_len) });
+                                let target_addr = target as *const _ as u32;
+                                stream.par().write(|w| unsafe { w.bits(target_addr) });
+
+                                // Enable Stream
+                                stream.cr().modify(|_, w| w.en().set_bit());
+
+                                Ok(DoubleBufferedTransfer {
+                                    last_ct: 0,
+                                    source0: source.0,
+                                    source1: source.1,
+                                    _source_element: PhantomData,
+                                    _target: PhantomData,
+                                    _channel: PhantomData,
+                                    stream,
+                                })
+                            }
+
+                            fn is_complete(&self) -> bool {
+                                self.stream.is_complete()
+                            }
+
+                            fn has_error(&self) -> bool {
+                                self.stream.has_error()
+                            }
+
+                            fn reset(mut self) -> $SX {
+                                self.stream.reset();
+                                self.stream
+                            }
+                        }
+
+                        impl<'s, SE, S: 's + AsRef<[SE]>, T, CHANNEL: DmaChannel> DoubleBufferedTransfer<'s, S, SE, T, CHANNEL> {
+                            pub fn poll<F: FnOnce(&'s S) -> &'s S>(mut self, f: F) -> Result<Self, $SX> {
+                                if self.has_error() {
+                                    return Err(self.reset())
+                                }
+
+                                let ct = if self.stream.cr().read().ct().bit() {
+                                    0
+                                } else {
+                                    1
+                                };
+                                if ct != self.last_ct {
+                                    if ct == 0 {
+                                        // Currently transfering from source0
+                                        self.source1 = f(self.source1);
+                                        assert_eq!(self.source1.as_ref().len(), self.source0.as_ref().len());
+                                        let source_addr = self.source1 as *const _ as u32;
+                                        self.stream.m1ar().write(|w| unsafe { w.bits(source_addr) });
+                                    } else if ct == 1 {
+                                        // Currently transfering from source1
+                                        self.source0 = f(self.source0);
+                                        assert_eq!(self.source0.as_ref().len(), self.source1.as_ref().len());
+                                        let source_addr = self.source0 as *const _ as u32;
+                                        self.stream.m0ar().write(|w| unsafe { w.bits(source_addr) });
+                                    }
+
+                                    self.last_ct = ct;
+                                }
+
+                                Ok(self)
+                            }
                         }
                     }
                 )+
@@ -263,6 +389,7 @@ dma! {
             s0ndtr: S0NDTR,
             s0par: S0PAR,
             s0m0ar: S0M0AR,
+            s0m1ar: S0M1AR,
             lisr: LISR,
             lifcr: LIFCR,
             tcif0, teif0,
@@ -274,6 +401,7 @@ dma! {
             s1ndtr: S1NDTR,
             s1par: S1PAR,
             s1m0ar: S1M0AR,
+            s1m1ar: S1M1AR,
             lisr: LISR,
             lifcr: LIFCR,
             tcif1, teif1,
@@ -285,6 +413,7 @@ dma! {
             s2ndtr: S2NDTR,
             s2par: S2PAR,
             s2m0ar: S2M0AR,
+            s2m1ar: S2M1AR,
             lisr: LISR,
             lifcr: LIFCR,
             tcif2, teif2,
@@ -296,6 +425,7 @@ dma! {
             s3ndtr: S3NDTR,
             s3par: S3PAR,
             s3m0ar: S3M0AR,
+            s3m1ar: S3M1AR,
             lisr: LISR,
             lifcr: LIFCR,
             tcif3, teif3,
@@ -307,6 +437,7 @@ dma! {
             s4ndtr: S4NDTR,
             s4par: S4PAR,
             s4m0ar: S4M0AR,
+            s4m1ar: S4M1AR,
             hisr: HISR,
             hifcr: HIFCR,
             tcif4, teif4,
@@ -318,6 +449,7 @@ dma! {
             s5ndtr: S5NDTR,
             s5par: S5PAR,
             s5m0ar: S5M0AR,
+            s5m1ar: S5M1AR,
             hisr: HISR,
             hifcr: HIFCR,
             tcif5, teif5,
@@ -329,6 +461,7 @@ dma! {
             s6ndtr: S6NDTR,
             s6par: S6PAR,
             s6m0ar: S6M0AR,
+            s6m1ar: S6M1AR,
             hisr: HISR,
             hifcr: HIFCR,
             tcif6, teif6,
@@ -340,6 +473,7 @@ dma! {
             s7ndtr: S7NDTR,
             s7par: S7PAR,
             s7m0ar: S7M0AR,
+            s7m1ar: S7M1AR,
             hisr: HISR,
             hifcr: HIFCR,
             tcif7, teif7,
@@ -353,6 +487,7 @@ dma! {
             s0ndtr: S0NDTR,
             s0par: S0PAR,
             s0m0ar: S0M0AR,
+            s0m1ar: S0M1AR,
             lisr: LISR,
             lifcr: LIFCR,
             tcif0, teif0,
@@ -364,6 +499,7 @@ dma! {
             s1ndtr: S1NDTR,
             s1par: S1PAR,
             s1m0ar: S1M0AR,
+            s1m1ar: S1M1AR,
             lisr: LISR,
             lifcr: LIFCR,
             tcif1, teif1,
@@ -375,6 +511,7 @@ dma! {
             s2ndtr: S2NDTR,
             s2par: S2PAR,
             s2m0ar: S2M0AR,
+            s2m1ar: S2M1AR,
             lisr: LISR,
             lifcr: LIFCR,
             tcif2, teif2,
@@ -386,6 +523,7 @@ dma! {
             s3ndtr: S3NDTR,
             s3par: S3PAR,
             s3m0ar: S3M0AR,
+            s3m1ar: S3M1AR,
             lisr: LISR,
             lifcr: LIFCR,
             tcif3, teif3,
@@ -397,6 +535,7 @@ dma! {
             s4ndtr: S4NDTR,
             s4par: S4PAR,
             s4m0ar: S4M0AR,
+            s4m1ar: S4M1AR,
             hisr: HISR,
             hifcr: HIFCR,
             tcif4, teif4,
@@ -408,6 +547,7 @@ dma! {
             s5ndtr: S5NDTR,
             s5par: S5PAR,
             s5m0ar: S5M0AR,
+            s5m1ar: S5M1AR,
             hisr: HISR,
             hifcr: HIFCR,
             tcif5, teif5,
@@ -419,6 +559,7 @@ dma! {
             s6ndtr: S6NDTR,
             s6par: S6PAR,
             s6m0ar: S6M0AR,
+            s6m1ar: S6M1AR,
             hisr: HISR,
             hifcr: HIFCR,
             tcif6, teif6,
@@ -430,6 +571,7 @@ dma! {
             s7ndtr: S7NDTR,
             s7par: S7PAR,
             s7m0ar: S7M0AR,
+            s7m1ar: S7M1AR,
             hisr: HISR,
             hifcr: HIFCR,
             tcif7, teif7,
