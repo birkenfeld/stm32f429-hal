@@ -1,6 +1,7 @@
 //! DMA abstractions
 
 use core::mem::size_of;
+use core::ops::Not;
 use rcc::AHB1;
 
 pub trait DmaChannel {
@@ -60,6 +61,23 @@ pub enum Event {
     TransferComplete,
 }
 
+#[derive(Debug, Clone, Copy)]
+enum DoubleBuffer {
+    Memory0 = 0,
+    Memory1 = 1,
+}
+
+impl Not for DoubleBuffer {
+    type Output = Self;
+    fn not(self) -> Self::Output {
+        match self {
+            DoubleBuffer::Memory0 =>
+                DoubleBuffer::Memory1,
+            DoubleBuffer::Memory1 =>
+                DoubleBuffer::Memory0,
+        }
+    }
+}
 
 pub trait DmaStream {
     fn listen(&mut self, event: Event);
@@ -70,8 +88,8 @@ pub trait DmaStream {
     fn reset(&mut self);
 }
 
-pub trait DmaStreamTransfer<'s, S: 's, X: Transfer<Self>>: DmaStream + Sized {
-    fn start_transfer<T, CHANNEL: DmaChannel>(self, source0: &'s [S], source1: &'s [S], target: &mut T) -> X;
+pub trait DmaStreamTransfer<S, X: Transfer<Self>>: DmaStream + Sized {
+    fn start_transfer<'s, T, CHANNEL: DmaChannel>(self, source0: &'s [S], source1: &'s [S], target: &mut T) -> X;
 }
 
 pub trait Transfer<STREAM>: Sized {
@@ -199,8 +217,8 @@ macro_rules! dma {
                         }
                     }
 
-                    impl<'s, S: 's> DmaStreamTransfer<'s, S, $sx::DoubleBufferedTransfer<'s, S>> for $SX {
-                        fn start_transfer<T, CHANNEL: DmaChannel>(mut self, source0: &'s [S], source1: &'s [S], target: &mut T) -> $sx::DoubleBufferedTransfer<'s, S> {
+                    impl<S> DmaStreamTransfer<S, $sx::DoubleBufferedTransfer<S>> for $SX {
+                        fn start_transfer<'s, T, CHANNEL: DmaChannel>(mut self, source0: &'s [S], source1: &'s [S], target: &mut T) -> $sx::DoubleBufferedTransfer<S> {
                             assert_eq!(source0.len(), source1.len());
 
                             self.cr().modify(|_, w| unsafe {
@@ -228,23 +246,23 @@ macro_rules! dma {
                             // Enable Stream
                             self.cr().modify(|_, w| w.en().set_bit());
 
-                            $sx::DoubleBufferedTransfer::new(self, source0, source1)
+                            $sx::DoubleBufferedTransfer::new(self)
                         }
                     }
 
                     pub mod $sx {
-                        use dma::{DmaStream, Transfer};
+                        use core::marker::PhantomData;
+                        use dma::{DmaStream, Transfer, DoubleBuffer};
                         use super::$SX;
 
-                        pub struct DoubleBufferedTransfer<'s, S: 's> {
+                        pub struct DoubleBufferedTransfer<S> {
                             /// So that `poll()` can detect a buffer switch
-                            last_ct: usize,
-                            source0: &'s [S],
-                            source1: &'s [S],
+                            sent: [bool; 2],
+                            _source_el: PhantomData<S>,
                             stream: $SX,
                         }
 
-                        impl<'s, S: 's> Transfer<$SX> for DoubleBufferedTransfer<'s, S> {
+                        impl<S> Transfer<$SX> for DoubleBufferedTransfer<S> {
                             fn is_complete(&self) -> bool {
                                 self.stream.is_complete()
                             }
@@ -259,44 +277,53 @@ macro_rules! dma {
                             }
                         }
 
-                        impl<'s, S: 's> DoubleBufferedTransfer<'s, S> {
-                            pub fn new(stream: $SX, source0: &'s [S], source1: &'s [S]) -> Self {
+                        impl<S> DoubleBufferedTransfer<S> {
+                            pub fn new<'s>(stream: $SX) -> Self {
                                 Self {
-                                    last_ct: 0,
-                                    source0, source1,
+                                    sent: [false; 2],
+                                    _source_el: PhantomData,
                                     stream,
                                 }
                             }
 
-                            pub fn poll<F: FnOnce(&'s [S]) -> &'s [S]>(mut self, f: F) -> Result<Self, $SX> {
-                                if self.has_error() {
-                                    return Err(self.reset())
-                                }
-
-                                let ct = if self.stream.cr().read().ct().bit() {
-                                    0
+                            /// Return the index of the buffer currently being sent
+                            fn front_buffer(&mut self) -> DoubleBuffer {
+                                if self.stream.cr().read().ct().bit() {
+                                    DoubleBuffer::Memory1
                                 } else {
-                                    1
-                                };
-                                if ct != self.last_ct {
-                                    if ct == 0 {
-                                        // Currently transfering from source0
-                                        self.source1 = f(self.source1);
-                                        assert_eq!(self.source1.as_ref().len(), self.source0.as_ref().len());
-                                        let source_addr = &self.source1[0] as *const _ as u32;
-                                        self.stream.m1ar().write(|w| unsafe { w.bits(source_addr) });
-                                    } else if ct == 1 {
-                                        // Currently transfering from source1
-                                        self.source0 = f(self.source0);
-                                        assert_eq!(self.source0.as_ref().len(), self.source1.as_ref().len());
-                                        let source_addr = &self.source0[0] as *const _ as u32;
-                                        self.stream.m0ar().write(|w| unsafe { w.bits(source_addr) });
-                                    }
+                                    DoubleBuffer::Memory0
+                                }
+                            }
 
-                                    self.last_ct = ct;
+                            /// Return the index of the buffer **not** currently being sent
+                            fn back_buffer(&mut self) -> DoubleBuffer {
+                                ! self.front_buffer()
+                            }
+
+                            pub fn writable(&mut self) -> bool {
+                                // Mark front buffer as being sent
+                                self.sent[self.front_buffer() as usize] = true;
+
+                                self.sent[self.back_buffer() as usize]
+                            }
+
+                            pub fn write<'s>(&mut self, source: &'s [S]) -> Result<(), ()> {
+                                if self.has_error() {
+                                    return Err(())
                                 }
 
-                                Ok(self)
+                                let source_addr = &source[0] as *const _ as u32;
+                                let bb = self.back_buffer();
+                                match bb {
+                                    DoubleBuffer::Memory0 =>
+                                        self.stream.m0ar().write(|w| unsafe { w.bits(source_addr) }),
+                                    DoubleBuffer::Memory1 =>
+                                        self.stream.m1ar().write(|w| unsafe { w.bits(source_addr) }),
+                                }
+                                // Let `writable()` mark it when it becomes the `front_buffer()`
+                                self.sent[bb as usize] = false;
+
+                                Ok(())
                             }
                         }
                     }
