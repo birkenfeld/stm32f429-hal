@@ -227,8 +227,8 @@ macro_rules! hal {
                     });
                 }
 
-                pub fn dma_transfer<'s, X: Transfer<STREAM, &'s S, u16>, S, STREAM, C>(&mut self, data: &'s S, stream: STREAM) -> Result<X, STREAM>
-                where STREAM: DmaStream + I2sDmaStream<$SPIX, C, DmaTx>,
+                pub fn dma_transfer<'s, S: 's, X: Transfer<STREAM>, STREAM, C>(&mut self, stream: STREAM, _channel: C, data: (&'s [S], &'s [S])) -> X
+                where STREAM: DmaStreamTransfer<'s, S, X> + I2sDmaStream<$SPIX, C, DmaTx>,
                       C: DmaChannel,
                 {
                     // Let SPI/I2S make a DMA request whenever the TXE flag is set
@@ -240,7 +240,7 @@ macro_rules! hal {
                         &mut *(&self.spi.dr as *const _ as *mut u16)
                     };
 
-                    stream.transfer(data, dr)
+                    stream.start_transfer::<u16, C>(data.0, data.1, dr)
                 }
             }
         )+

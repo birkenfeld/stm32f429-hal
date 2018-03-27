@@ -60,9 +60,21 @@ pub enum Event {
     TransferComplete,
 }
 
-pub trait Transfer<STREAM, S, T>: Sized {
-    fn new(stream: STREAM, source: S, target: &mut T) -> Result<Self, STREAM>;
 
+pub trait DmaStream {
+    fn listen(&mut self, event: Event);
+    fn unlisten(&mut self, event: Event);
+
+    fn is_complete(&self) -> bool;
+    fn has_error(&self) -> bool;
+    fn reset(&mut self);
+}
+
+pub trait DmaStreamTransfer<'s, S: 's, X: Transfer<Self>>: DmaStream + Sized {
+    fn start_transfer<T, CHANNEL: DmaChannel>(self, source0: &'s [S], source1: &'s [S], target: &mut T) -> X;
+}
+
+pub trait Transfer<STREAM>: Sized {
     fn is_complete(&self) -> bool;
     fn has_error(&self) -> bool;
     fn reset(self) -> STREAM;
@@ -77,15 +89,6 @@ pub trait Transfer<STREAM, S, T>: Sized {
     }
 }
 
-
-pub trait DmaStream: Sized {
-    fn listen(&mut self, event: Event);
-    fn unlisten(&mut self, event: Event);
-    fn transfer<S, T, X: Transfer<Self, S, T>>(self, source: S, target: &mut T) -> Result<X, Self>;
-    fn is_complete(&self) -> bool;
-    fn has_error(&self) -> bool;
-    fn reset(&mut self);
-}
 
 macro_rules! dma {
     ($($DMAX:ident: ($dmaX:ident, $dmaXen:ident, $dmaXrst:ident, {
@@ -107,14 +110,16 @@ macro_rules! dma {
                 use stm32f429::{$DMAX, dma2};
 
                 use rcc::AHB1;
-                use dma::{DmaExt, DmaStream,
-                          Transfer, Event};
+                use dma::{DmaExt, DmaStream, DmaStreamTransfer, DmaChannel,
+                          Event, data_size};
 
+                #[derive(Debug)]
                 pub struct Streams {
                     $(pub $sx: $SX),+
                 }
 
                 $(
+                    #[derive(Debug)]
                     pub struct $SX { _0: () }
 
                     impl $SX {
@@ -174,10 +179,6 @@ macro_rules! dma {
                             }
                         }
 
-                        fn transfer<S, T, X: Transfer<Self, S, T>>(self, source: S, target: &mut T) -> Result<X, Self> {
-                            X::new(self, source, target)
-                        }
-
                         fn is_complete(&self) -> bool {
                             self.isr().$tcif().bit()
                         }
@@ -198,119 +199,52 @@ macro_rules! dma {
                         }
                     }
 
+                    impl<'s, S: 's> DmaStreamTransfer<'s, S, $sx::DoubleBufferedTransfer<'s, S>> for $SX {
+                        fn start_transfer<T, CHANNEL: DmaChannel>(mut self, source0: &'s [S], source1: &'s [S], target: &mut T) -> $sx::DoubleBufferedTransfer<'s, S> {
+                            assert_eq!(source0.len(), source1.len());
+
+                            self.cr().modify(|_, w| unsafe {
+                                w.msize().bits(data_size::<S>())
+                                    .minc().set_bit()
+                                    .psize().bits(data_size::<T>())
+                                    .pinc().clear_bit()
+                                    .dbm().set_bit()
+                                    .ct().clear_bit()
+                                    .circ().set_bit()
+                                // Memory to peripheral
+                                    .dir().bits(0b01)
+                                    .chsel().bits(CHANNEL::channel())
+                            });
+
+                            let source0_addr = &source0[0] as *const _ as u32;
+                            self.m0ar().write(|w| unsafe { w.bits(source0_addr) });
+                            let source1_addr = &source1[0] as *const _ as u32;
+                            self.m1ar().write(|w| unsafe { w.bits(source1_addr) });
+                            let source_len = source0.len() as u32;
+                            self.ndtr().write(|w| unsafe { w.bits(source_len) });
+                            let target_addr = target as *const _ as u32;
+                            self.par().write(|w| unsafe { w.bits(target_addr) });
+
+                            // Enable Stream
+                            self.cr().modify(|_, w| w.en().set_bit());
+
+                            $sx::DoubleBufferedTransfer::new(self, source0, source1)
+                        }
+                    }
+
                     pub mod $sx {
-                        use core::marker::PhantomData;
-                        use dma::{DmaStream, DmaChannel,
-                                  Transfer, data_size};
+                        use dma::{DmaStream, Transfer};
                         use super::$SX;
 
-                        pub struct MemoryToPeripheral<'s, S: 's + AsRef<[SE]>, SE, T, CHANNEL> {
-                            _source: PhantomData<&'s S>,
-                            _source_element: PhantomData<SE>,
-                            _target: PhantomData<T>,
-                            stream: $SX,
-                            _channel: PhantomData<CHANNEL>,
-                        }
-
-                        impl<'s, SE, S: 's + AsRef<[SE]>, T, CHANNEL: DmaChannel> Transfer<$SX, &'s S, T> for MemoryToPeripheral<'s, S, SE, T, CHANNEL> {
-                            fn new(mut stream: $SX, source: &'s S, target: &mut T) -> Result<Self, $SX> {
-                                stream.cr().modify(|_, w| unsafe {
-                                    w.msize().bits(data_size::<SE>())
-                                        .minc().set_bit()
-                                        .psize().bits(data_size::<T>())
-                                        .pinc().clear_bit()
-                                        .circ().clear_bit()
-                                        // Memory to peripheral
-                                        .dir().bits(0b01)
-                                        .chsel().bits(CHANNEL::channel())
-                                });
-
-                                let source_addr = &source.as_ref() as *const _ as u32;
-                                stream.m0ar().write(|w| unsafe { w.bits(source_addr) });
-                                let source_len = source.as_ref().len() as u32;
-                                stream.ndtr().write(|w| unsafe { w.bits(source_len) });
-                                let target_addr = target as *const _ as u32;
-                                stream.par().write(|w| unsafe { w.bits(target_addr) });
-
-                                // Enable Stream
-                                stream.cr().modify(|_, w| w.en().set_bit());
-
-                                Ok(Self {
-                                    _source: PhantomData,
-                                    _source_element: PhantomData,
-                                    _target: PhantomData,
-                                    stream,
-                                    _channel: PhantomData,
-                                })
-                            }
-
-                            fn is_complete(&self) -> bool {
-                                self.stream.is_complete()
-                            }
-
-                            fn has_error(&self) -> bool {
-                                self.stream.has_error()
-                            }
-
-                            fn reset(mut self) -> $SX {
-                                self.stream.reset();
-                                self.stream
-                            }
-                        }
-
-                        pub struct DoubleBufferedTransfer<'s, S: 's, SE, T, CHANNEL> {
+                        pub struct DoubleBufferedTransfer<'s, S: 's> {
                             /// So that `poll()` can detect a buffer switch
                             last_ct: usize,
-                            source0: &'s S,
-                            source1: &'s S,
-                            _source_element: PhantomData<SE>,
-                            _target: PhantomData<T>,
+                            source0: &'s [S],
+                            source1: &'s [S],
                             stream: $SX,
-                            _channel: PhantomData<CHANNEL>,
                         }
 
-                        impl<'s, SE, S: 's + AsRef<[SE]>, T, CHANNEL: DmaChannel> Transfer<$SX, (&'s S, &'s S), T> for DoubleBufferedTransfer<'s, S, SE, T, CHANNEL> {
-                            fn new(mut stream: $SX, source: (&'s S, &'s S), target: &mut T) -> Result<Self, $SX> {
-                                if source.0.as_ref().len() != source.1.as_ref().len() {
-                                    return Err(stream)
-                                }
-
-                                stream.cr().modify(|_, w| unsafe {
-                                    w.msize().bits(data_size::<SE>())
-                                        .minc().set_bit()
-                                        .psize().bits(data_size::<T>())
-                                        .pinc().clear_bit()
-                                        .dbm().set_bit()
-                                        .ct().clear_bit()
-                                        .circ().set_bit()
-                                        // Memory to peripheral
-                                        .dir().bits(0b01)
-                                        .chsel().bits(CHANNEL::channel())
-                                });
-
-                                let source0_addr = source.0 as *const _ as u32;
-                                stream.m0ar().write(|w| unsafe { w.bits(source0_addr) });
-                                let source1_addr = source.1 as *const _ as u32;
-                                stream.m1ar().write(|w| unsafe { w.bits(source1_addr) });
-                                let source_len = source.0.as_ref().len() as u32;
-                                stream.ndtr().write(|w| unsafe { w.bits(source_len) });
-                                let target_addr = target as *const _ as u32;
-                                stream.par().write(|w| unsafe { w.bits(target_addr) });
-
-                                // Enable Stream
-                                stream.cr().modify(|_, w| w.en().set_bit());
-
-                                Ok(DoubleBufferedTransfer {
-                                    last_ct: 0,
-                                    source0: source.0,
-                                    source1: source.1,
-                                    _source_element: PhantomData,
-                                    _target: PhantomData,
-                                    _channel: PhantomData,
-                                    stream,
-                                })
-                            }
-
+                        impl<'s, S: 's> Transfer<$SX> for DoubleBufferedTransfer<'s, S> {
                             fn is_complete(&self) -> bool {
                                 self.stream.is_complete()
                             }
@@ -325,8 +259,16 @@ macro_rules! dma {
                             }
                         }
 
-                        impl<'s, SE, S: 's + AsRef<[SE]>, T, CHANNEL: DmaChannel> DoubleBufferedTransfer<'s, S, SE, T, CHANNEL> {
-                            pub fn poll<F: FnOnce(&'s S) -> &'s S>(mut self, f: F) -> Result<Self, $SX> {
+                        impl<'s, S: 's> DoubleBufferedTransfer<'s, S> {
+                            pub fn new(stream: $SX, source0: &'s [S], source1: &'s [S]) -> Self {
+                                Self {
+                                    last_ct: 0,
+                                    source0, source1,
+                                    stream,
+                                }
+                            }
+
+                            pub fn poll<F: FnOnce(&'s [S]) -> &'s [S]>(mut self, f: F) -> Result<Self, $SX> {
                                 if self.has_error() {
                                     return Err(self.reset())
                                 }
@@ -341,13 +283,13 @@ macro_rules! dma {
                                         // Currently transfering from source0
                                         self.source1 = f(self.source1);
                                         assert_eq!(self.source1.as_ref().len(), self.source0.as_ref().len());
-                                        let source_addr = self.source1 as *const _ as u32;
+                                        let source_addr = &self.source1[0] as *const _ as u32;
                                         self.stream.m1ar().write(|w| unsafe { w.bits(source_addr) });
                                     } else if ct == 1 {
                                         // Currently transfering from source1
                                         self.source0 = f(self.source0);
                                         assert_eq!(self.source0.as_ref().len(), self.source1.as_ref().len());
-                                        let source_addr = self.source0 as *const _ as u32;
+                                        let source_addr = &self.source0[0] as *const _ as u32;
                                         self.stream.m0ar().write(|w| unsafe { w.bits(source_addr) });
                                     }
 
