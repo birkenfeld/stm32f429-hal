@@ -169,7 +169,7 @@ macro_rules! hal {
                 }
 
                 /// Configure in slave mode as output
-                pub fn into_slave_output<Data: I2sData>(self, standard: I2sStandard) -> I2sOutput<SlaveRole, Data, $SPIX, SD, CK, WS> {
+                pub fn into_slave_output<S: I2sData>(self, standard: I2sStandard) -> I2sOutput<SlaveRole, S, $SPIX, SD, CK, WS> {
                     self.spi.i2scfgr.modify(|_, w| {
                         unsafe {
                             // Select I2S mode
@@ -178,7 +178,7 @@ macro_rules! hal {
                                 .i2scfg().bits(0b00)
                                 .i2sstd().bits(standard as u8)
                                 // data length
-                                .datlen().bits(Data::datlen())
+                                .datlen().bits(S::datlen())
                                 // "auto"
                                 .chlen().clear_bit()
                         }
@@ -202,7 +202,7 @@ macro_rules! hal {
                 }
             }
 
-            impl<Role, Data: I2sData + Sized, SD, CK, WS> I2sOutput<Role, Data, $SPIX, SD, CK, WS> {
+            impl<'s, Role, S: I2sData + Sized + 's, SD, CK, WS> I2sOutput<Role, S, $SPIX, SD, CK, WS> {
                 /// Disable and return `I2s`
                 pub fn into_i2s(self) -> I2s<$SPIX, SD, CK, WS> {
                     // Wait
@@ -220,14 +220,14 @@ macro_rules! hal {
                 }
 
                 /// Write data word
-                pub fn write(&mut self, data: Data) {
+                pub fn write(&mut self, data: S) {
                     data.for_u16(|word| {
                         while ! self.spi.sr.read().txe().bit() {}
                         self.spi.dr.write(|w| unsafe { w.dr().bits(word) });
                     });
                 }
 
-                pub fn dma_transfer<'s, S: 's, X: Transfer<STREAM>, STREAM, C>(&mut self, stream: STREAM, _channel: C, data: (&'s [S], &'s [S])) -> X
+                pub fn dma_transfer<X: Transfer<STREAM>, STREAM, C>(&mut self, stream: STREAM, _channel: C, data: (&'s [S], &'s [S])) -> X
                 where STREAM: DmaStreamTransfer<S, X> + I2sDmaStream<$SPIX, C, DmaTx>,
                       C: DmaChannel,
                 {
