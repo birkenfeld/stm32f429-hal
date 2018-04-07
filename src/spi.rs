@@ -4,7 +4,7 @@ use core::ptr;
 
 use hal::spi::{FullDuplex, Mode, Phase, Polarity};
 use nb;
-use stm32f429::{SPI1, SPI2, SPI3};
+use stm32f429::{SPI1, SPI2, SPI3, SPI4, SPI5, SPI6};
 
 use gpio::gpioa::{PA5, PA6, PA7};
 use gpio::gpiob::{PB13, PB14, PB15, PB5};
@@ -205,6 +205,9 @@ hal! {
     SPI1: (spi1, APB2, spi1en, spi1rst, pclk2),
     SPI2: (spi2, APB1, spi2en, spi2rst, pclk1),
     SPI3: (spi3, APB1, spi3en, spi3rst, pclk1),
+    SPI4: (spi4, APB2, spi4en, spi4rst, pclk2),
+    SPI5: (spi5, APB2, spi5en, spi5rst, pclk2),
+    SPI6: (spi6, APB2, spi6en, spi6rst, pclk2),
 }
 
 // FIXME not working
