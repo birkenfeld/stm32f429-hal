@@ -4,7 +4,9 @@ use core::mem::size_of;
 use core::ops::Not;
 use rcc::AHB1;
 
+/// DMA channel, implemented by the types `C0`, `C1`, `C2`, …
 pub trait DmaChannel {
+    /// Numeric channel number
     fn channel() -> u8;
 }
 
@@ -49,15 +51,20 @@ impl DmaChannel for C7 {
     fn channel() -> u8 { 7 }
 }
 
-
+/// Split the DMA device into separate streams.
 pub trait DmaExt {
+    /// Target type
     type Streams;
 
+    /// Split into separate streams.
     fn split(self, ahb: &mut AHB1) -> Self::Streams;
 }
 
+/// Events to enable interrupts for.
 pub enum Event {
+    /// Half transfer
     HalfTransfer,
+    /// Transfer complete
     TransferComplete,
 }
 
@@ -79,24 +86,39 @@ impl Not for DoubleBuffer {
     }
 }
 
+/// DMA stream peripheral
 pub trait DmaStream {
+    /// Enable interrupt
     fn listen(&mut self, event: Event);
+    /// Disable interrupt
     fn unlisten(&mut self, event: Event);
 
+    /// Transfer is complete?
     fn is_complete(&self) -> bool;
+    /// Transfer has error?
     fn has_error(&self) -> bool;
+    /// Reset after a transfer
     fn reset(&mut self);
 }
 
+/// DMA stream that can start DMA transfer `X`
 pub trait DmaStreamTransfer<S, X: Transfer<Self>>: DmaStream + Sized {
+    /// Start DMA transfer
     fn start_transfer<'s, T, CHANNEL: DmaChannel>(self, source0: &'s [S], source1: &'s [S], target: &mut T) -> X;
 }
 
+/// DMA transfer
 pub trait Transfer<STREAM>: Sized {
+    /// Transfer is complete?
     fn is_complete(&self) -> bool;
+    /// Transfer has error?
     fn has_error(&self) -> bool;
+    /// Reset after a transfer
+    ///
+    /// Consumes the finished transfer and returns the stream.
     fn reset(self) -> STREAM;
 
+    /// Wait until transfer is either complete or has error.
     fn wait(self) -> Result<STREAM, STREAM> {
         while !self.is_complete() && !self.has_error() {}
         if self.is_complete() {
@@ -124,6 +146,7 @@ macro_rules! dma {
         ),)+
     }),)+) => {
         $(
+            /// Peripheral abstraction for DMA
             pub mod $dmaX {
                 use stm32f429::{$DMAX, dma2};
 
@@ -131,12 +154,18 @@ macro_rules! dma {
                 use dma::{DmaExt, DmaStream, DmaStreamTransfer, DmaChannel,
                           Event, data_size};
 
+                /// The numbered DMA streams of a device that you can
+                /// use separately.
                 #[derive(Debug)]
                 pub struct Streams {
-                    $(pub $sx: $SX),+
+                    $(
+                        /// DMA stream `$sx`
+                        pub $sx: $SX
+                    ),+
                 }
 
                 $(
+                    /// A handle to the `$SX` DMA peripheral
                     #[derive(Debug)]
                     pub struct $SX { _0: () }
 
@@ -218,6 +247,7 @@ macro_rules! dma {
                     }
 
                     impl<S> DmaStreamTransfer<S, $sx::DoubleBufferedTransfer<S>> for $SX {
+                        /// Configure, enable, and return a double-buffered DMA transfer.
                         fn start_transfer<'s, T, CHANNEL: DmaChannel>(mut self, source0: &'s [S], source1: &'s [S], target: &mut T) -> $sx::DoubleBufferedTransfer<S> {
                             assert_eq!(source0.len(), source1.len());
 
@@ -250,11 +280,13 @@ macro_rules! dma {
                         }
                     }
 
+                    /// Contains the `DoubleBufferedTransfer` for `$SX`
                     pub mod $sx {
                         use core::marker::PhantomData;
                         use dma::{DmaStream, Transfer, DoubleBuffer};
                         use super::$SX;
 
+                        /// Double-buffered DMA transfer
                         pub struct DoubleBufferedTransfer<S> {
                             /// So that `poll()` can detect a buffer switch
                             sent: [bool; 2],
@@ -278,6 +310,10 @@ macro_rules! dma {
                         }
 
                         impl<S> DoubleBufferedTransfer<S> {
+                            /// Construct a new DMA transfer state,
+                            /// returned by `start_transfer` which
+                            /// configures and enables the stream
+                            /// before.
                             pub fn new<'s>(stream: $SX) -> Self {
                                 Self {
                                     sent: [false; 2],
@@ -287,6 +323,7 @@ macro_rules! dma {
                             }
 
                             /// Return the index of the buffer currently being sent
+                            #[inline]
                             fn front_buffer(&mut self) -> DoubleBuffer {
                                 if self.stream.cr().read().ct().bit() {
                                     DoubleBuffer::Memory1
@@ -296,10 +333,16 @@ macro_rules! dma {
                             }
 
                             /// Return the index of the buffer **not** currently being sent
+                            #[inline]
                             fn back_buffer(&mut self) -> DoubleBuffer {
                                 ! self.front_buffer()
                             }
 
+                            /// Has the back buffer been sent?
+                            ///
+                            /// As this is used for polling, the
+                            /// function updates the `sent` status of
+                            /// the front buffer.
                             pub fn writable(&mut self) -> bool {
                                 // Mark front buffer as being sent
                                 self.sent[self.front_buffer() as usize] = true;
@@ -307,6 +350,7 @@ macro_rules! dma {
                                 self.sent[self.back_buffer() as usize]
                             }
 
+                            /// Update the back buffer.
                             pub fn write<'s>(&mut self, source: &'s [S]) -> Result<(), ()> {
                                 if self.has_error() {
                                     return Err(())

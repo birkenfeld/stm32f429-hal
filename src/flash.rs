@@ -1,4 +1,4 @@
-//! Flash memory
+//! Flash memory (**untested** for STM32F429!)
 
 use stm32f429::{flash, FLASH};
 

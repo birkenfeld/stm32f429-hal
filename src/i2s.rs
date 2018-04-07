@@ -115,8 +115,12 @@ pub struct I2sOutput<Role, Data, SPI, SD, CK, WS> {
     ws: WS,
 }
 
+/// Implemented by data types that fit the device's data width: `u16`,
+/// and `u32`.
 pub trait I2sData {
+    /// Value for I2C `datlen` register field.
     fn datlen() -> u8;
+    /// Run given `f` closure for each 16-bit part of the value.
     fn for_u16<F: Fn(u16)>(&self, f: F);
 }
 
@@ -227,6 +231,7 @@ macro_rules! hal {
                     });
                 }
 
+                /// Start writing with DMA
                 pub fn dma_transfer<X: Transfer<STREAM>, STREAM, C>(&mut self, stream: STREAM, _channel: C, data: (&'s [S], &'s [S])) -> X
                 where STREAM: DmaStreamTransfer<S, X> + I2sDmaStream<$SPIX, C, DmaTx>,
                       C: DmaChannel,
