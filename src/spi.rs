@@ -4,11 +4,11 @@ use core::ptr;
 
 use hal::spi::{FullDuplex, Mode, Phase, Polarity};
 use nb;
-use stm32f429::{SPI1, SPI2, SPI3, SPI4, SPI5, SPI6};
+use stm32f429::{SPI1, SPI2, SPI3/*, SPI4, SPI5, SPI6*/};
 
 use gpio::gpioa::{PA5, PA6, PA7};
 use gpio::gpiob::{PB13, PB14, PB15, PB5};
-use gpio::gpioc::{PC10, PC11, PC12};
+use gpio::gpioc::{PC2, PC10, PC11, PC12};
 use gpio::{AF5, AF6};
 use rcc::{APB1, APB2, Clocks};
 use time::Hertz;
@@ -47,6 +47,7 @@ unsafe impl MisoPin<SPI1> for PA6<AF5> {}
 // unsafe impl MisoPin<SPI1> for PB4<AF5> {}
 
 unsafe impl MisoPin<SPI2> for PB14<AF5> {}
+unsafe impl MisoPin<SPI2> for PC2<AF5> {}
 
 // unsafe impl MisoPin<SPI3> for PB4<AF6> {}
 unsafe impl MisoPin<SPI3> for PC11<AF6> {}
@@ -76,7 +77,7 @@ macro_rules! hal {
                     mode: Mode,
                     freq: F,
                     clocks: Clocks,
-                    apb2: &mut $APBX,
+                    apb: &mut $APBX,
                 ) -> Self
                 where
                     F: Into<Hertz>,
@@ -85,18 +86,16 @@ macro_rules! hal {
                     MOSI: MosiPin<$SPIX>,
                 {
                     // enable or reset $SPIX
-                    apb2.enr().modify(|_, w| w.$spiXen().enabled());
-                    apb2.rstr().modify(|_, w| w.$spiXrst().set_bit());
-                    apb2.rstr().modify(|_, w| w.$spiXrst().clear_bit());
+                    apb.enr().modify(|_, w| w.$spiXen().set_bit());
+                    apb.rstr().modify(|_, w| w.$spiXrst().set_bit());
+                    apb.rstr().modify(|_, w| w.$spiXrst().clear_bit());
 
-                    // FRXTH: RXNE event is generated if the FIFO level is greater than or equal to
-                    //        8-bit
-                    // DS: 8-bit data size
-                    // SSOE: Slave Select output disabled
-                    spi.cr2
-                        .write(|w| unsafe {
-                            w.frxth().set_bit().ds().bits(0b111).ssoe().clear_bit()
-                        });
+                    spi.cr2.write(|w| w
+                                  // Tx buffer empty interrupt disable
+                                  .txeie().clear_bit()
+                                  // SS output disable
+                                  .ssoe().clear_bit()
+                    );
 
                     let br = match clocks.$pclkX().0 / freq.into().0 {
                         0 => unreachable!(),
@@ -110,40 +109,45 @@ macro_rules! hal {
                         _ => 0b111,
                     };
 
-                    // CPHA: phase
-                    // CPOL: polarity
-                    // MSTR: master mode
-                    // BR: 1 MHz
-                    // SPE: SPI disabled
-                    // LSBFIRST: MSB first
-                    // SSM: enable software slave management (NSS pin free for other uses)
-                    // SSI: set nss high = master mode
-                    // CRCEN: hardware CRC calculation disabled
-                    // BIDIMODE: 2 line unidirectional (full duplex)
                     spi.cr1.write(|w| unsafe {
-                        w.cpha()
-                            .bit(mode.phase == Phase::CaptureOnSecondTransition)
-                            .cpol()
-                            .bit(mode.polarity == Polarity::IdleHigh)
-                            .mstr()
-                            .set_bit()
-                            .br()
-                            .bits(br)
-                            .spe()
-                            .set_bit()
-                            .lsbfirst()
-                            .clear_bit()
-                            .ssi()
-                            .set_bit()
-                            .ssm()
-                            .set_bit()
-                            .crcen()
-                            .clear_bit()
-                            .bidimode()
-                            .clear_bit()
+                        w
+                            // 8-bit data frame format
+                            .dff().clear_bit()
+                            // Clock phase
+                            .cpha().bit(mode.phase == Phase::CaptureOnSecondTransition)
+                            // Clock polariy
+                            .cpol().bit(mode.polarity == Polarity::IdleLow)
+                            // Master mode
+                            .mstr().set_bit()
+                            // 1 MHz
+                            .br().bits(br)
+                            // Enable SPI
+                            .spe().set_bit()
+                            // MSB transmitted first
+                            .lsbfirst().clear_bit()
+                            // Set NSS high
+                            .ssi().set_bit()
+                            // Software slave management
+                            .ssm().set_bit()
+                            // Disable CRC calculation
+                            .crcen().clear_bit()
+                            // 2-line unidirectional data mode
+                            .bidimode().clear_bit()
+                            // TX only
+                            .rxonly().clear_bit()
                     });
 
                     Spi { spi, pins }
+                }
+
+                /// Enable transmit interrupt
+                pub fn enable_send_interrupt(&mut self) {
+                    self.spi.cr2.modify(|_, w| w.txeie().set_bit());
+                }
+
+                /// Disable transmit interrupt
+                pub fn disable_send_interrupt(&mut self) {
+                    self.spi.cr2.modify(|_, w| w.txeie().clear_bit());
                 }
 
                 /// Releases the SPI peripheral and associated pins
@@ -205,9 +209,11 @@ hal! {
     SPI1: (spi1, APB2, spi1en, spi1rst, pclk2),
     SPI2: (spi2, APB1, spi2en, spi2rst, pclk1),
     SPI3: (spi3, APB1, spi3en, spi3rst, pclk1),
+    /* Available in the datasheet but not in the .svd:
     SPI4: (spi4, APB2, spi4en, spi4rst, pclk2),
     SPI5: (spi5, APB2, spi5en, spi5rst, pclk2),
     SPI6: (spi6, APB2, spi6en, spi6rst, pclk2),
+     */
 }
 
 // FIXME not working
