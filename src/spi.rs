@@ -93,8 +93,8 @@ macro_rules! hal {
                     spi.cr2.write(|w| w
                                   // Tx buffer empty interrupt disable
                                   .txeie().clear_bit()
-                                  // SS output disable
-                                  .ssoe().clear_bit()
+                                  // SS output enable
+                                  .ssoe().set_bit()
                     );
 
                     let br = match clocks.$pclkX().0 / freq.into().0 {
@@ -116,7 +116,7 @@ macro_rules! hal {
                             // Clock phase
                             .cpha().bit(mode.phase == Phase::CaptureOnSecondTransition)
                             // Clock polariy
-                            .cpol().bit(mode.polarity == Polarity::IdleLow)
+                            .cpol().bit(mode.polarity == Polarity::IdleHigh)
                             // Master mode
                             .mstr().set_bit()
                             // 1 MHz
@@ -133,7 +133,7 @@ macro_rules! hal {
                             .crcen().clear_bit()
                             // 2-line unidirectional data mode
                             .bidimode().clear_bit()
-                            // TX only
+                            // Full duplex
                             .rxonly().clear_bit()
                     });
 
