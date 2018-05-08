@@ -7,7 +7,7 @@ license = "MIT OR Apache-2.0"
 name = "stm32f429-hal"
 repository = "https://github.com/astro/stm32f429-hal"
 documentation = "https://docs.rs/stm32f429-hal"
-version = "0.0.0"
+version = "0.0.1"
 
 [dependencies]
 cortex-m = "0.4.3"
