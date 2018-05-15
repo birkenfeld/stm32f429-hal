@@ -7,13 +7,13 @@ license = "MIT OR Apache-2.0"
 name = "stm32f429-hal"
 repository = "https://github.com/astro/stm32f429-hal"
 documentation = "https://docs.rs/stm32f429-hal"
-version = "0.0.1"
+version = "0.0.2"
 
 [dependencies]
 cortex-m = "0.5.1"
 embedded-hal = "0.2.1"
 nb = "0.1.1"
-stm32f429 = { path = "../stm32f429" }
+stm32f429 = "0.4.0"
 
 [dependencies.cast]
 default-features = false
