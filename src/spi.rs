@@ -9,6 +9,7 @@ use stm32f429::{SPI1, SPI2, SPI3/*, SPI4, SPI5, SPI6*/};
 use gpio::gpioa::{PA5, PA6, PA7};
 use gpio::gpiob::{PB13, PB14, PB15, PB5};
 use gpio::gpioc::{PC2, PC10, PC11, PC12};
+use gpio::gpiod::{PD3};
 use gpio::{AF5, AF6};
 use rcc::{APB1, APB2, Clocks};
 use time::Hertz;
@@ -39,6 +40,7 @@ unsafe impl SckPin<SPI1> for PA5<AF5> {}
 // unsafe impl SckPin<SPI1> for PB3<AF5> {}
 
 unsafe impl SckPin<SPI2> for PB13<AF5> {}
+unsafe impl SckPin<SPI2> for PD3<AF5> {}
 
 // unsafe impl SckPin<SPI3> for PB3<AF6> {}
 unsafe impl SckPin<SPI3> for PC10<AF6> {}
