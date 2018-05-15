@@ -1,5 +1,6 @@
 //! Timers
 
+use void::Void;
 use cast::{u16, u32};
 use hal::timer::{CountDown, Periodic};
 use nb;
@@ -59,7 +60,7 @@ macro_rules! hal {
                     self.tim.cr1.modify(|_, w| w.cen().set_bit());
                 }
 
-                fn wait(&mut self) -> nb::Result<(), !> {
+                fn wait(&mut self) -> nb::Result<(), Void> {
                     if self.tim.sr.read().uif().bit_is_clear() {
                         Err(nb::Error::WouldBlock)
                     } else {
