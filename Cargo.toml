@@ -13,7 +13,7 @@ version = "0.1.0"
 cortex-m = "0.5"
 embedded-hal = "0.2"
 nb = "0.1"
-stm32f429 = "0.5"
+stm32f429 = { git = "https://github.com/birkenfeld/stm32f429" }
 
 [dependencies.cast]
 default-features = false

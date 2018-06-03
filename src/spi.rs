@@ -4,12 +4,13 @@ use core::ptr;
 
 use hal::spi::{FullDuplex, Mode, Phase, Polarity};
 use nb;
-use stm32f429::{SPI1, SPI2, SPI3/*, SPI4, SPI5, SPI6*/};
+use stm32f429::{SPI1, SPI2, SPI3, SPI5/*, SPI4, SPI6*/};
 
 use gpio::gpioa::{PA5, PA6, PA7};
 use gpio::gpiob::{PB13, PB14, PB15, PB5};
 use gpio::gpioc::{PC2, PC10, PC11, PC12};
 use gpio::gpiod::{PD3};
+use gpio::gpiof::{PF7, PF8, PF9};
 use gpio::{AF5, AF6};
 use rcc::{APB1, APB2, Clocks};
 use time::Hertz;
@@ -47,6 +48,8 @@ unsafe impl SckPin<SPI2> for PD3<AF5> {}
 // unsafe impl SckPin<SPI3> for PB3<AF6> {}
 unsafe impl SckPin<SPI3> for PC10<AF6> {}
 
+unsafe impl SckPin<SPI5> for PF7<AF5> {}
+
 unsafe impl MisoPin<SPI1> for PA6<AF5> {}
 // unsafe impl MisoPin<SPI1> for PB4<AF5> {}
 
@@ -56,6 +59,8 @@ unsafe impl MisoPin<SPI2> for PC2<AF5> {}
 // unsafe impl MisoPin<SPI3> for PB4<AF6> {}
 unsafe impl MisoPin<SPI3> for PC11<AF6> {}
 
+unsafe impl MisoPin<SPI5> for PF8<AF5> {}
+
 unsafe impl MosiPin<SPI1> for PA7<AF5> {}
 unsafe impl MosiPin<SPI1> for PB5<AF5> {}
 
@@ -63,6 +68,8 @@ unsafe impl MosiPin<SPI2> for PB15<AF5> {}
 
 unsafe impl MosiPin<SPI3> for PB5<AF6> {}
 unsafe impl MosiPin<SPI3> for PC12<AF6> {}
+
+unsafe impl MosiPin<SPI5> for PF9<AF5> {}
 
 /// Rx direction
 pub struct DmaRx;
@@ -289,9 +296,9 @@ hal! {
     SPI1: (spi1, APB2, spi1en, spi1rst, pclk2),
     SPI2: (spi2, APB1, spi2en, spi2rst, pclk1),
     SPI3: (spi3, APB1, spi3en, spi3rst, pclk1),
+    SPI5: (spi5, APB2, spi5en, spi5rst, pclk2),
     /* Available in the datasheet but not in the .svd:
     SPI4: (spi4, APB2, spi4en, spi4rst, pclk2),
-    SPI5: (spi5, APB2, spi5en, spi5rst, pclk2),
     SPI6: (spi6, APB2, spi6en, spi6rst, pclk2),
      */
 }
