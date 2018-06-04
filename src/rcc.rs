@@ -188,7 +188,7 @@ impl CFGR {
     /// Freezes the clock configuration, making it effective
     pub fn freeze(self, acr: &mut ACR) -> Clocks {
         let pllmul = (2 * self.sysclk.unwrap_or(HSI)) / HSI;
-        let pllmul = cmp::min(cmp::max(pllmul, 2), 16);
+        let pllmul = cmp::min(cmp::max(pllmul, 2), 32);
         let pllmul_bits = if pllmul == 2 {
             None
         } else {
@@ -197,7 +197,7 @@ impl CFGR {
 
         let sysclk = pllmul * HSI / 2;
 
-        assert!(sysclk <= 72_000_000);
+        assert!(sysclk <= 180_000_000);
 
         // Prescaler factor
         let hpre_bits = self.hclk
@@ -217,7 +217,7 @@ impl CFGR {
 
         let hclk = sysclk / (1 << (hpre_bits - 0b0111));
 
-        assert!(hclk <= 72_000_000);
+        assert!(hclk <= 180_000_000);
 
         let ppre1_bits = self.pclk1
             .map(|pclk1| match hclk / pclk1 {
@@ -270,7 +270,7 @@ impl CFGR {
             rcc.cfgr.modify(|_, w| w.hpre().bits(pllmul_bits));
 
             // Enable PLL
-            rcc.cr.write(|w| w.pllon().set_bit());
+            rcc.cr.modify(|_, w| w.pllon().set_bit());
             // Wait for PLL ready
             while rcc.cr.read().pllrdy().bit_is_clear() {}
 
