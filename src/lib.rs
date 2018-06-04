@@ -37,7 +37,7 @@ pub mod gpio;
 pub mod i2c;
 // pub mod prelude;
 pub mod rcc;
-// pub mod serial;
+pub mod serial;
 pub mod spi;
 pub mod time;
 pub mod timer;

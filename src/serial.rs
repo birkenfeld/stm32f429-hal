@@ -10,7 +10,7 @@ use stm32f429::{USART1, USART2, USART3};
 use gpio::gpioa::{PA10, PA2, PA3, PA9};
 use gpio::gpiob::{PB10, PB11, PB6, PB7};
 use gpio::gpioc::{PC10, PC11, PC4, PC5};
-use gpio::gpiod::{PD5, PD6, PD8, PD9};
+use gpio::gpiod::{PD5, PD6, PD8, PD9, PD12};
 use gpio::gpioe::{PE0, PE1, PE15};
 use gpio::AF7;
 use rcc::{APB1, APB2, Clocks};
@@ -45,6 +45,12 @@ pub unsafe trait TxPin<USART> {}
 /// RX pin - DO NOT IMPLEMENT THIS TRAIT
 pub unsafe trait RxPin<USART> {}
 
+/// RTS pin - DO NOT IMPLEMENT THIS TRAIT
+pub unsafe trait RtsPin<USART> {}
+
+/// CTS pin - DO NOT IMPLEMENT THIS TRAIT
+pub unsafe trait CtsPin<USART> {}
+
 unsafe impl TxPin<USART1> for PA9<AF7> {}
 unsafe impl TxPin<USART1> for PB6<AF7> {}
 unsafe impl TxPin<USART1> for PC4<AF7> {}
@@ -73,6 +79,9 @@ unsafe impl RxPin<USART3> for PB11<AF7> {}
 unsafe impl RxPin<USART3> for PC11<AF7> {}
 unsafe impl RxPin<USART3> for PD9<AF7> {}
 unsafe impl RxPin<USART3> for PE15<AF7> {}
+
+// XXX: add more impls
+unsafe impl RtsPin<USART3> for PD12<AF7> {}
 
 /// Serial abstraction
 pub struct Serial<USART, PINS> {
@@ -109,11 +118,11 @@ macro_rules! hal {
                     RX: RxPin<$USARTX>,
                 {
                     // enable or reset $USARTX
-                    apb.enr().modify(|_, w| w.$usartXen().enabled());
+                    apb.enr().modify(|_, w| w.$usartXen().set_bit());
                     apb.rstr().modify(|_, w| w.$usartXrst().set_bit());
                     apb.rstr().modify(|_, w| w.$usartXrst().clear_bit());
 
-                    // disable hardware flow control
+                    // hardware flow control
                     // TODO enable DMA
                     // usart.cr3.write(|w| w.rtse().clear_bit().ctse().clear_bit());
 
@@ -155,6 +164,16 @@ macro_rules! hal {
                     }
                 }
 
+                /// Enable the RTS pin.
+                pub fn set_rts<RTS: RtsPin<$USARTX>>(&mut self, _rts: RTS) {
+                    self.usart.cr3.modify(|_, w| w.rtse().bit(true));
+                }
+
+                /// Enable the CTS pin.
+                pub fn set_cts<CTS: CtsPin<$USARTX>>(&mut self, _cts: CTS) {
+                    self.usart.cr3.modify(|_, w| w.ctse().bit(true));
+                }
+
                 /// Splits the `Serial` abstraction into a transmitter and a receiver half
                 pub fn split(self) -> (Tx<$USARTX>, Rx<$USARTX>) {
                     (
@@ -178,21 +197,25 @@ macro_rules! hal {
 
                 fn read(&mut self) -> nb::Result<u8, Error> {
                     // NOTE(unsafe) atomic read with no side effects
-                    let isr = unsafe { (*$USARTX::ptr()).isr.read() };
+                    let isr = unsafe { (*$USARTX::ptr()).sr.read() };
 
-                    Err(if isr.pe().bit_is_set() {
-                        nb::Error::Other(Error::Parity)
-                    } else if isr.fe().bit_is_set() {
-                        nb::Error::Other(Error::Framing)
-                    } else if isr.nf().bit_is_set() {
-                        nb::Error::Other(Error::Noise)
-                    } else if isr.ore().bit_is_set() {
-                        nb::Error::Other(Error::Overrun)
-                    } else if isr.rxne().bit_is_set() {
+                    Err(if isr.rxne().bit_is_set() {
                         // NOTE(read_volatile) see `write_volatile` below
                         return Ok(unsafe {
-                            ptr::read_volatile(&(*$USARTX::ptr()).rdr as *const _ as *const _)
+                            ptr::read_volatile(&(*$USARTX::ptr()).dr as *const _ as *const _)
                         });
+                    } else if isr.pe().bit_is_set() {
+                        unsafe { ptr::read_volatile(&(*$USARTX::ptr()).dr as *const _ as *const _); }
+                        nb::Error::Other(Error::Parity)
+                    } else if isr.fe().bit_is_set() {
+                        unsafe { ptr::read_volatile(&(*$USARTX::ptr()).dr as *const _ as *const _); }
+                        nb::Error::Other(Error::Framing)
+                    } else if isr.nf().bit_is_set() {
+                        unsafe { ptr::read_volatile(&(*$USARTX::ptr()).dr as *const _ as *const _); }
+                        nb::Error::Other(Error::Noise)
+                    } else if isr.ore().bit_is_set() {
+                        unsafe { ptr::read_volatile(&(*$USARTX::ptr()).dr as *const _ as *const _); }
+                        nb::Error::Other(Error::Overrun)
                     } else {
                         nb::Error::WouldBlock
                     })
@@ -207,7 +230,7 @@ macro_rules! hal {
 
                 fn flush(&mut self) -> nb::Result<(), !> {
                     // NOTE(unsafe) atomic read with no side effects
-                    let isr = unsafe { (*$USARTX::ptr()).isr.read() };
+                    let isr = unsafe { (*$USARTX::ptr()).sr.read() };
 
                     if isr.tc().bit_is_set() {
                         Ok(())
@@ -218,13 +241,13 @@ macro_rules! hal {
 
                 fn write(&mut self, byte: u8) -> nb::Result<(), !> {
                     // NOTE(unsafe) atomic read with no side effects
-                    let isr = unsafe { (*$USARTX::ptr()).isr.read() };
+                    let isr = unsafe { (*$USARTX::ptr()).sr.read() };
 
                     if isr.txe().bit_is_set() {
                         // NOTE(unsafe) atomic write to stateless register
                         // NOTE(write_volatile) 8-bit write that's not possible through the svd2rust API
                         unsafe {
-                            ptr::write_volatile(&(*$USARTX::ptr()).tdr as *const _ as *mut _, byte)
+                            ptr::write_volatile(&(*$USARTX::ptr()).dr as *const _ as *mut _, byte)
                         }
                         Ok(())
                     } else {
@@ -238,6 +261,6 @@ macro_rules! hal {
 
 hal! {
     USART1: (usart1, APB2, usart1en, usart1rst, pclk2),
-    USART2: (usart2, APB1, usart2en, usart2rst, pclk1),
-    USART3: (usart3, APB1, usart3en, usart3rst, pclk1),
+    USART2: (usart2, APB1, usart2en, uart2rst, pclk1),
+    USART3: (usart3, APB1, usart3en, uart3rst, pclk1),
 }
