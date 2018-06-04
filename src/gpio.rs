@@ -113,6 +113,8 @@ macro_rules! gpio {
                 pub moder: MODER,
                 /// Opaque OTYPER register
                 pub otyper: OTYPER,
+                /// Opaque OSPEEDR register
+                pub ospeedr: OSPEEDR,
                 /// Opaque PUPDR register
                 pub pupdr: PUPDR,
                 $(
@@ -134,6 +136,7 @@ macro_rules! gpio {
                         afrl: AFRL { _0: () },
                         moder: MODER { _0: () },
                         otyper: OTYPER { _0: () },
+                        ospeedr: OSPEEDR { _0: () },
                         pupdr: PUPDR { _0: () },
                         $(
                             $pxi: $PXi { _mode: PhantomData },
@@ -183,6 +186,17 @@ macro_rules! gpio {
             impl OTYPER {
                 pub(crate) fn otyper(&mut self) -> &$gpioy::OTYPER {
                     unsafe { &(*$GPIOX::ptr()).otyper }
+                }
+            }
+
+            /// Opaque OSPEEDR register
+            pub struct OSPEEDR {
+                _0: (),
+            }
+
+            impl OSPEEDR {
+                pub(crate) fn ospeedr(&mut self) -> &$gpioy::OSPEEDR {
+                    unsafe { &(*$GPIOX::ptr()).ospeedr }
                 }
             }
 
@@ -418,6 +432,34 @@ macro_rules! gpio {
                         otyper
                             .otyper()
                             .modify(|r, w| unsafe { w.bits(r.bits() & !(0b1 << $i)) });
+
+                        $PXi { _mode: PhantomData }
+                    }
+
+                    /// Configures the pin to serve as alternate function 9 or 14
+                    pub fn into_lcd(
+                        self,
+                        moder: &mut MODER,
+                        ospeedr: &mut OSPEEDR,
+                        afr: &mut $AFR,
+                        af: u32
+                    ) -> $PXi<AF7> {
+                        let offset = 2 * $i;
+
+                        // alternate function mode
+                        let mode = 0b10;
+                        moder.moder().modify(|r, w| unsafe {
+                            w.bits((r.bits() & !(0b11 << offset)) | (mode << offset))
+                        });
+                        ospeedr.ospeedr().modify(|r, w| unsafe {
+                            w.bits((r.bits() & !(0b11 << offset)) | (mode << offset))
+                        });
+
+                        let offset = 4 * ($i % 8);
+
+                        afr.afr().modify(|r, w| unsafe {
+                            w.bits((r.bits() & !(0b1111 << offset)) | (af << offset))
+                        });
 
                         $PXi { _mode: PhantomData }
                     }
