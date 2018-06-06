@@ -1,7 +1,5 @@
 //! Reset and Clock Control
 
-use core::cmp;
-
 use cast::u32;
 use stm32f429::{rcc, RCC};
 
@@ -187,15 +185,13 @@ impl CFGR {
 
     /// Freezes the clock configuration, making it effective
     pub fn freeze(self, acr: &mut ACR) -> Clocks {
-        let pllmul = (2 * self.sysclk.unwrap_or(HSI)) / HSI;
-        let pllmul = cmp::min(cmp::max(pllmul, 2), 32);
-        let pllmul_bits = if pllmul == 2 {
-            None
+        let target_sysclk = self.sysclk.unwrap_or(HSI);
+        let (pll_n_bits, sysclk) = if target_sysclk > HSI {
+            (Some(32 * (target_sysclk / 1000000) / (HSI / 1000000)),
+             16 * target_sysclk / 16)
         } else {
-            Some(pllmul as u8 - 2)
+            (None, HSI)
         };
-
-        let sysclk = pllmul * HSI / 2;
 
         assert!(sysclk <= 180_000_000);
 
@@ -275,9 +271,9 @@ impl CFGR {
         });
 
         let rcc = unsafe { &*RCC::ptr() };
-        if let Some(pllmul_bits) = pllmul_bits {
+        if let Some(pll_n_bits) = pll_n_bits {
             // use PLL as source
-            rcc.cfgr.modify(|_, w| w.hpre().bits(pllmul_bits));
+            rcc.pllcfgr.modify(|_, w| unsafe { w.plln().bits(pll_n_bits as u16) });
 
             // Enable PLL
             rcc.cr.modify(|_, w| w.pllon().set_bit());
