@@ -259,8 +259,18 @@ impl CFGR {
                 0b000
             } else if sysclk <= 48_000_000 {
                 0b001
-            } else {
+            } else if sysclk <= 72_000_000 {
                 0b010
+            } else if sysclk <= 96_000_000 {
+                0b011
+            } else if sysclk <= 120_000_000 {
+                0b100
+            } else if sysclk <= 144_000_000 {
+                0b101
+            } else if sysclk <= 168_000_000 {
+                0b110
+            } else {
+                0b111
             })
         });
 
