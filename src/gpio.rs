@@ -99,7 +99,7 @@ macro_rules! gpio {
 
             use rcc::AHB1;
             use super::{
-                AF4, AF5, AF6, AF7, Floating, GpioExt, Input, OpenDrain, Output,
+                AF4, AF5, AF6, AF7, AF11, Floating, GpioExt, Input, OpenDrain, Output,
                 PullDown, PullUp, PushPull,
             };
 
@@ -459,6 +459,33 @@ macro_rules! gpio {
 
                         afr.afr().modify(|r, w| unsafe {
                             w.bits((r.bits() & !(0b1111 << offset)) | (af << offset))
+                        });
+
+                        $PXi { _mode: PhantomData }
+                    }
+
+                    /// Configures the pin to serve as Ethernet
+                    pub fn into_eth(
+                        self,
+                        moder: &mut MODER,
+                        ospeedr: &mut OSPEEDR,
+                        afr: &mut $AFR,
+                    ) -> $PXi<AF11> {
+                        let offset = 2 * $i;
+
+                        // alternate function mode
+                        let mode = 0b10;
+                        moder.moder().modify(|r, w| unsafe {
+                            w.bits((r.bits() & !(0b11 << offset)) | (mode << offset))
+                        });
+                        ospeedr.ospeedr().modify(|r, w| unsafe {
+                            w.bits((r.bits() & !(0b11 << offset)) | (mode << offset))
+                        });
+
+                        let offset = 4 * ($i % 8);
+
+                        afr.afr().modify(|r, w| unsafe {
+                            w.bits((r.bits() & !(0b1111 << offset)) | (0xB << offset))
                         });
 
                         $PXi { _mode: PhantomData }
