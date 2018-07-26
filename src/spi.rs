@@ -13,6 +13,8 @@ use gpio::gpiod::{PD3};
 use gpio::{AF5, AF6};
 use rcc::{APB1, APB2, Clocks};
 use time::Hertz;
+use dma::{DmaChannel, DmaStreamTransfer, Transfer,
+          C0, C3, dma1, dma2};
 
 /// SPI error
 #[derive(Debug)]
@@ -61,6 +63,24 @@ unsafe impl MosiPin<SPI2> for PB15<AF5> {}
 
 unsafe impl MosiPin<SPI3> for PB5<AF6> {}
 unsafe impl MosiPin<SPI3> for PC12<AF6> {}
+
+/// Rx direction
+pub struct DmaRx;
+/// Tx direction
+pub struct DmaTx;
+
+/// Possible DMA configuration for an SPI device
+pub unsafe trait SpiDmaStream<STREAM, CHANNEL, DIRECTION> {}
+unsafe impl SpiDmaStream<SPI3, C0, DmaRx> for dma1::S0 {}
+unsafe impl SpiDmaStream<SPI3, C0, DmaRx> for dma1::S2 {}
+unsafe impl SpiDmaStream<SPI2, C0, DmaRx> for dma1::S3 {}
+unsafe impl SpiDmaStream<SPI2, C0, DmaTx> for dma1::S4 {}
+unsafe impl SpiDmaStream<SPI3, C0, DmaTx> for dma1::S5 {}
+unsafe impl SpiDmaStream<SPI3, C0, DmaTx> for dma1::S7 {}
+unsafe impl SpiDmaStream<SPI1, C3, DmaRx> for dma2::S0 {}
+unsafe impl SpiDmaStream<SPI1, C3, DmaRx> for dma2::S2 {}
+unsafe impl SpiDmaStream<SPI1, C3, DmaTx> for dma2::S3 {}
+unsafe impl SpiDmaStream<SPI1, C3, DmaTx> for dma2::S5 {}
 
 /// SPI peripheral operating in full duplex master mode
 pub struct Spi<SPI, PINS> {
@@ -156,6 +176,22 @@ macro_rules! hal {
                 pub fn free(self) -> ($SPIX, (SCK, MISO, MOSI)) {
                     (self.spi, self.pins)
                 }
+
+                /// Start a one-shot DMA transfer
+                pub fn dma_write<S, T, STREAM, CHANNEL, X>(&mut self, dma: STREAM, data: S) -> X
+                where
+                    S: AsRef<[T]>,
+                    STREAM: DmaStreamTransfer<S, T, X> + SpiDmaStream<$SPIX, CHANNEL, DmaTx>,
+                    CHANNEL: DmaChannel,
+                    X: Transfer<STREAM>,
+                {
+                    self.spi.cr2.modify(|_, w| w.txdmaen().set_bit());
+                    
+                    let dr: &mut T = unsafe {
+                        &mut *(&self.spi.dr as *const _ as *mut T)
+                    };
+                    dma.start_transfer::<CHANNEL>(data, dr)
+                }
             }
 
             impl<PINS> FullDuplex<u8> for Spi<$SPIX, PINS> {
@@ -184,9 +220,13 @@ macro_rules! hal {
                 fn send(&mut self, byte: u8) -> nb::Result<(), Error> {
                     let sr = self.spi.sr.read();
 
-                    Err(if sr.ovr().bit_is_set() {
+                    Err(/*if sr.ovr().bit_is_set() {
+                        // Clear the flag:
+                        unsafe {
+                            ptr::read_volatile(&self.spi.dr as *const _ as *const u8)
+                        };
                         nb::Error::Other(Error::Overrun)
-                    } else if sr.modf().bit_is_set() {
+                    } else*/ if sr.modf().bit_is_set() {
                         nb::Error::Other(Error::ModeFault)
                     } else if sr.crcerr().bit_is_set() {
                         nb::Error::Other(Error::Crc)
@@ -201,8 +241,46 @@ macro_rules! hal {
             }
 
             impl<PINS> ::hal::blocking::spi::transfer::Default<u8> for Spi<$SPIX, PINS> {}
+            // impl<PINS> ::hal::blocking::spi::write::Default<u8> for Spi<$SPIX, PINS> {}
 
-            impl<PINS> ::hal::blocking::spi::write::Default<u8> for Spi<$SPIX, PINS> {}
+            impl<PINS> ::hal::blocking::spi::Write<u8> for Spi<$SPIX, PINS> {
+                type Error = Error;
+
+                fn write(&mut self, bytes: &[u8]) -> Result<(), Error> {
+                    for byte in bytes {
+                        'l: loop {
+                            let sr = self.spi.sr.read();
+
+                            // ignore overruns because we don't care about the incoming data
+                            // if sr.ovr().bit_is_set() {
+                            // Err(nb::Error::Other(Error::Overrun))
+                            // } else
+                            if sr.modf().bit_is_set() {
+                                return Err(Error::ModeFault);
+                            } else if sr.crcerr().bit_is_set() {
+                                return Err(Error::Crc);
+                            } else if sr.txe().bit_is_set() {
+                                // NOTE(write_volatile) see note above
+                                unsafe { ptr::write_volatile(&self.spi.dr as *const _ as *mut u8, *byte) }
+                                break 'l;
+                            } else {
+                                // try again
+                            }
+                        }
+                    }
+
+                    // wait until the transmission of the last byte is done
+                    while self.spi.sr.read().bsy().bit_is_set() {}
+
+                    // clear OVR flag
+                    unsafe {
+                        ptr::read_volatile(&self.spi.dr as *const _ as *const u8);
+                    }
+                    self.spi.sr.read();
+
+                    Ok(())
+                }
+            }
         )+
     }
 }

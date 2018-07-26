@@ -231,22 +231,23 @@ macro_rules! hal {
                     });
                 }
 
-                /// Start writing with DMA
-                pub fn dma_transfer<X: Transfer<STREAM>, STREAM, C>(&mut self, stream: STREAM, _channel: C, data: (&'s [S], &'s [S])) -> X
-                where STREAM: DmaStreamTransfer<S, X> + I2sDmaStream<$SPIX, C, DmaTx>,
-                      C: DmaChannel,
-                {
-                    // Let SPI/I2S make a DMA request whenever the TXE flag is set
-                    self.spi.cr2.modify(|_, w| w.txdmaen().set_bit());
-                    // Writing a 16-bit register here,
-                    // even if rust2svd-generated code
-                    // <T> accesses it as 32-bit aligned.
-                    let dr: &mut u16 = unsafe {
-                        &mut *(&self.spi.dr as *const _ as *mut u16)
-                    };
+                // /// Start writing with DMA
+                // pub fn dma_transfer<X: Transfer<STREAM>, STREAM, C>(&mut self, stream: STREAM, _channel: C, data: (&'s [S], &'s [S])) -> X
+                // where STREAM: DmaStreamTransfer<&'s [S], S, X> + I2sDmaStream<$SPIX, C, DmaTx>,
+                //       C: DmaChannel,
+                // {
+                //     // Let SPI/I2S make a DMA request whenever the TXE flag is set
+                //     self.spi.cr2.modify(|_, w| w.txdmaen().set_bit());
+                //     // Writing a 16-bit register here,
+                //     // even if rust2svd-generated code
+                //     // <T> accesses it as 32-bit aligned.
+                //     let dr: &mut S = unsafe {
+                //         &mut *(&self.spi.dr as *const _ as *mut S)
+                //     };
 
-                    stream.start_transfer::<u16, C>(data.0, data.1, dr)
-                }
+                //     let source = (data.0, data.1);
+                //     stream.start_transfer::<C>(source, dr)
+                // }
             }
         )+
     }

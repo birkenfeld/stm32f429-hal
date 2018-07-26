@@ -102,9 +102,9 @@ pub trait DmaStream {
 }
 
 /// DMA stream that can start DMA transfer `X`
-pub trait DmaStreamTransfer<S, X: Transfer<Self>>: DmaStream + Sized {
+pub trait DmaStreamTransfer<S, T, X: Transfer<Self>>: DmaStream + Sized {
     /// Start DMA transfer
-    fn start_transfer<'s, T, CHANNEL: DmaChannel>(self, source0: &'s [S], source1: &'s [S], target: &mut T) -> X;
+    fn start_transfer<CHANNEL: DmaChannel>(self, source: S, target: &mut T) -> X;
 }
 
 /// DMA transfer
@@ -245,16 +245,16 @@ macro_rules! dma {
                             });
                         }
                     }
-
-                    impl<S> DmaStreamTransfer<S, $sx::DoubleBufferedTransfer<S>> for $SX {
+                    
+                    impl<'s, S> DmaStreamTransfer<(&'s [S], &'s [S]), S, $sx::DoubleBufferedTransfer<S>> for $SX {
                         /// Configure, enable, and return a double-buffered DMA transfer.
-                        fn start_transfer<'s, T, CHANNEL: DmaChannel>(mut self, source0: &'s [S], source1: &'s [S], target: &mut T) -> $sx::DoubleBufferedTransfer<S> {
+                        fn start_transfer<CHANNEL: DmaChannel>(mut self, (source0, source1): (&'s [S], &'s [S]), target: &mut S) -> $sx::DoubleBufferedTransfer<S> {
                             assert_eq!(source0.len(), source1.len());
 
                             self.cr().modify(|_, w| unsafe {
                                 w.msize().bits(data_size::<S>())
                                     .minc().set_bit()
-                                    .psize().bits(data_size::<T>())
+                                    .psize().bits(data_size::<S>())
                                     .pinc().clear_bit()
                                     .dbm().set_bit()
                                     .ct().clear_bit()
@@ -280,7 +280,37 @@ macro_rules! dma {
                         }
                     }
 
-                    /// Contains the `DoubleBufferedTransfer` for `$SX`
+                    impl<T, S: AsRef<[T]>> DmaStreamTransfer<S, T, $sx::OneShotTransfer<S>> for $SX {
+                        /// Configure, enable, and return a double-buffered DMA transfer.
+                        fn start_transfer<CHANNEL: DmaChannel>(mut self, source: S, target: &mut T) -> $sx::OneShotTransfer<S> {
+                            self.cr().modify(|_, w| unsafe {
+                                w.msize().bits(data_size::<T>())
+                                    .minc().set_bit()
+                                    .psize().bits(data_size::<T>())
+                                    .pinc().clear_bit()
+                                    .dbm().clear_bit()
+                                    .ct().clear_bit()
+                                    .circ().clear_bit()
+                                    // Memory to peripheral
+                                    .dir().bits(0b01)
+                                    .chsel().bits(CHANNEL::channel())
+                            });
+
+                            let source_addr = &source as *const _ as u32;
+                            self.m0ar().write(|w| unsafe { w.bits(source_addr) });
+                            let source_len = source.as_ref().len() as u32;
+                            self.ndtr().write(|w| unsafe { w.bits(source_len) });
+                            let target_addr = target as *const _ as u32;
+                            self.par().write(|w| unsafe { w.bits(target_addr) });
+
+                            // Enable Stream
+                            self.cr().modify(|_, w| w.en().set_bit());
+
+                            $sx::OneShotTransfer::new(self, source)
+                        }
+                    }
+
+                    /// Contains the `DoubleBufferedTransfer` and the `OneShotTransfer` for `$SX`
                     pub mod $sx {
                         use core::marker::PhantomData;
                         use dma::{DmaStream, Transfer, DoubleBuffer};
@@ -370,6 +400,46 @@ macro_rules! dma {
                                 Ok(())
                             }
                         }
+
+                        /// One-shot DMA transfer
+                        pub struct OneShotTransfer<S> {
+                            source: S,
+                            stream: $SX,
+                        }
+
+                        impl<S> Transfer<$SX> for OneShotTransfer<S> {
+                            fn is_complete(&self) -> bool {
+                                self.stream.is_complete()
+                            }
+
+                            fn has_error(&self) -> bool {
+                                self.stream.has_error()
+                            }
+
+                            fn reset(mut self) -> $SX {
+                                drop(self.source);
+                                self.stream.reset();
+                                self.stream
+                            }
+                        }
+
+                        impl<S> OneShotTransfer<S> {
+                            /// Construct a new DMA transfer state,
+                            /// returned by `start_transfer` which
+                            /// configures and enables the stream
+                            /// before.
+                            pub fn new<'s>(stream: $SX, source: S) -> Self {
+                                Self {
+                                    source,
+                                    stream,
+                                }
+                            }
+
+                            /// debug
+                            pub fn status(&mut self) -> u32 {
+                                self.stream.cr().read().bits()
+                            }
+                        }
                     }
                 )+
 
@@ -378,6 +448,8 @@ macro_rules! dma {
 
                     fn split(self, ahb: &mut AHB1) -> Streams {
                         ahb.enr().modify(|_, w| w.$dmaXen().set_bit());
+                        ahb.rstr().modify(|_, w| w.$dmaXrst().set_bit());
+                        ahb.rstr().modify(|_, w| w.$dmaXrst().clear_bit());
 
                         // reset the DMA control registers (stops all on-going transfers)
                         $(
