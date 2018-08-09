@@ -296,7 +296,7 @@ macro_rules! dma {
                                     .chsel().bits(CHANNEL::channel())
                             });
 
-                            let source_addr = &source as *const _ as u32;
+                            let source_addr = source.as_ref() as *const _ as *const () as u32;
                             self.m0ar().write(|w| unsafe { w.bits(source_addr) });
                             let source_len = source.as_ref().len() as u32;
                             self.ndtr().write(|w| unsafe { w.bits(source_len) });
