@@ -4,8 +4,8 @@ use void::Void;
 use cast::{u16, u32};
 use hal::timer::{CountDown, Periodic};
 use nb;
-use stm32f429::{TIM2, TIM3, TIM4, TIM5,
-                TIM6, TIM7, TIM9, TIM10,
+use stm32f429::{TIM1, TIM2, TIM3, TIM4, TIM5,
+                TIM6, TIM7, TIM8, TIM9, TIM10,
                 TIM11, TIM12, TIM13, TIM14};
 
 use rcc::{APB1, APB2, Clocks};
@@ -126,12 +126,14 @@ macro_rules! hal {
 }
 
 hal! {
+    TIM1: (tim1, APB2, tim1en, tim1rst),
     TIM2: (tim2, APB1, tim2en, tim2rst),
     TIM3: (tim3, APB1, tim3en, tim3rst),
     TIM4: (tim4, APB1, tim4en, tim4rst),
     TIM5: (tim5, APB1, tim5en, tim5rst),
     TIM6: (tim6, APB1, tim6en, tim6rst),
     TIM7: (tim7, APB1, tim7en, tim7rst),
+    TIM8: (tim8, APB2, tim8en, tim8rst),
     TIM9: (tim9, APB2, tim9en, tim9rst),
     TIM10: (tim10, APB2, tim10en, tim10rst),
     TIM11: (tim11, APB2, tim11en, tim11rst),
