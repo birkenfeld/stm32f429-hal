@@ -43,3 +43,4 @@ pub mod time;
 pub mod timer;
 pub mod i2s;
 pub mod dma;
+pub mod udid;
