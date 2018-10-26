@@ -560,6 +560,18 @@ macro_rules! gpio {
                         unsafe { (*$GPIOX::ptr()).bsrr.write(|w| w.bits(1 << (16 + $i))) }
                     }
                 }
+
+                impl<MODE> $PXi<Input<MODE>> {
+                    /// Check if input is low.
+                    pub fn is_low(&self) -> bool {
+                        unsafe { (*$GPIOX::ptr()).idr.read().bits() & (1 << $i) == 0 }
+                    }
+
+                    /// Check if input is high.
+                    pub fn is_high(&self) -> bool {
+                        unsafe { (*$GPIOX::ptr()).idr.read().bits() & (1 << $i) != 0 }
+                    }
+                }
             )+
         }
     }
