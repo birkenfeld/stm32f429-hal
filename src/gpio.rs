@@ -534,6 +534,16 @@ macro_rules! gpio {
                             )
                         });
                     }
+
+                    /// Check if signal is low.
+                    pub fn is_low(&self) -> bool {
+                        unsafe { (*$GPIOX::ptr()).idr.read().bits() & (1 << $i) == 0 }
+                    }
+
+                    /// Check if signal is high.
+                    pub fn is_high(&self) -> bool {
+                        unsafe { (*$GPIOX::ptr()).idr.read().bits() & (1 << $i) != 0 }
+                    }
                 }
 
                 impl<MODE> $PXi<Output<MODE>> {
